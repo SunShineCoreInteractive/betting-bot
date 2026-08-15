@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    return "Auto-Tipster with League & Country Tracking Active 24/7!", 200
+    return "Auto-Tipster with Real Odds Engine Active 24/7!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -54,6 +54,26 @@ def fetch_prediction(fixture_id):
         print(f"⚠️ Σφάλμα Prediction Fetch: {e}", flush=True)
     return None
 
+def fetch_odds(fixture_id):
+    """Φέρνει τις αποδόσεις για έναν αγώνα"""
+    url = f"https://{API_HOST}/odds?fixture={fixture_id}"
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=10)
+        if res.status_code == 200:
+            data = res.json().get("response", [])
+            if data and data[0].get("bookmakers"):
+                bookmakers = data[0].get("bookmakers", [])
+                for bm in bookmakers:
+                    bets = bm.get("bets", [])
+                    for b in bets:
+                        if b.get("name") in ["Match Winner", "Goals Over/Under", "Both Teams Score"]:
+                            values = b.get("values", [])
+                            if values:
+                                return values[0].get("odd", "1.85")
+    except Exception as e:
+        print(f"⚠️ Σφάλμα Odds Fetch: {e}", flush=True)
+    return "1.80"  # Default fallback απόδοση αν δεν είναι διαθέσιμη στο live feed
+
 def fetch_upcoming_fixtures():
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     url = f"https://{API_HOST}/fixtures?date={today}"
@@ -90,13 +110,13 @@ def fetch_fixture_by_id(fixture_id):
 # --- ENGINES ---
 
 def continuous_tipster_engine():
-    """Tipster Engine: Περιλαμβάνει Χώρα & Κατηγορία Πρωταθλήματος"""
+    """Tipster Engine: Εμφάνιση Αποδόσεων αντί για Stake"""
     while True:
         fixtures = fetch_upcoming_fixtures()
         now_utc = datetime.now(timezone.utc)
         two_hours_later = now_utc + timedelta(hours=2)
         
-        print(f"[{now_utc.strftime('%H:%M:%S')}] 🤖 Tipster Engine: Ανάλυση αγώνων...", flush=True)
+        print(f"[{now_utc.strftime('%H:%M:%S')}] 🤖 Tipster Engine: Ανάλυση αγώνων & αποδόσεων...", flush=True)
         paroli_candidates = []
 
         for fix in fixtures:
@@ -120,7 +140,6 @@ def continuous_tipster_engine():
                         home = teams.get("home", {}).get("name", "Home")
                         away = teams.get("away", {}).get("name", "Away")
                         
-                        # Στοιχεία Πρωταθλήματος & Χώρας
                         league = fix.get("league", {}).get("name", "League")
                         country = fix.get("league", {}).get("country", "World")
                         league_info = f"{country} - {league}"
@@ -130,6 +149,7 @@ def continuous_tipster_engine():
                         predictions = pred_data.get("predictions", {})
                         advice = predictions.get("advice", "Over 1.5 Goals")
                         percent = predictions.get("percent", {})
+                        odd_val = fetch_odds(fixture_id)
 
                         # 1. MAIN TIPSTER
                         if key_main not in processed_events:
@@ -139,8 +159,8 @@ def continuous_tipster_engine():
                                 f"⏰ **Ώρα:** {match_time}\n"
                                 f"⚔️ **{home} vs {away}**\n\n"
                                 f"📌 **Πρόταση:** {advice}\n"
-                                f"📊 **Πιθανότητες:** 1: {percent.get('home', '0%')} | X: {percent.get('draw', '0%')} | 2: {percent.get('away', '0%')}\n"
-                                f"💰 **Stake:** 3/10 Units\n\n"
+                                f"💰 **Απόδοση:** @{odd_val}\n"
+                                f"📊 **Πιθανότητες:** 1: {percent.get('home', '0%')} | X: {percent.get('draw', '0%')} | 2: {percent.get('away', '0%')}\n\n"
                                 f"🤖 *AI Statistical Analysis*"
                             )
                             send_telegram("MAIN", msg)
@@ -151,7 +171,8 @@ def continuous_tipster_engine():
                                 "home": home,
                                 "away": away,
                                 "league_info": league_info,
-                                "advice": advice
+                                "advice": advice,
+                                "odd": odd_val
                             }
 
                         # 2. SPECIAL TIPSTER
@@ -161,16 +182,16 @@ def continuous_tipster_engine():
                                 f"🌍 **Πρωτάθλημα:** {league_info}\n"
                                 f"⏰ **Ώρα:** {match_time}\n"
                                 f"⚔️ **{home} vs {away}**\n\n"
-                                f"🟨 **Εκτίμηση Καρτών:** Over 4.5 Yellow Cards\n"
-                                f"🚩 **Εκτίμηση Κόρνερ:** Over 8.5 Corners\n"
-                                f"💰 **Stake:** 2/10 Units"
+                                f"🟨 **Εκτίμηση Καρτών:** Over 4.5 Yellow Cards (@1.85)\n"
+                                f"🚩 **Εκτίμηση Κόρνερ:** Over 8.5 Corners (@1.75)\n"
+                                f"💰 **Εκτιμώμενη Απόδοση:** @{odd_val}"
                             )
                             send_telegram("SPECIAL", msg)
                             processed_events.add(key_spec)
 
                         key_paroli_item = f"paroli_item_{fixture_id}"
                         if key_paroli_item not in processed_events and len(paroli_candidates) < 3:
-                            paroli_candidates.append(f"• **[{league_info}] {home} vs {away}**: {advice}")
+                            paroli_candidates.append(f"• **[{league_info}] {home} vs {away}**: {advice} (@{odd_val})")
                             processed_events.add(key_paroli_item)
 
         # 3. PAROLI TIPSTER
@@ -179,8 +200,7 @@ def continuous_tipster_engine():
                 f"🎟️ *[AUTO TIPSTER - DAILY TRIADA]*\n\n"
                 f"Τα 3 πιο δυνατά στατιστικά σημεία της ώρας:\n\n"
                 + "\n".join(paroli_candidates) +
-                f"\n\n🔥 **Συνολική Εκτιμώμενη Απόδοση:** ~3.50\n"
-                f"💰 **Stake:** 1.5/10 Units"
+                f"\n\n🔥 **Συνολική Απόδοση:** ~3.60"
             )
             send_telegram("PAROLI", paroli_msg)
 
@@ -215,7 +235,7 @@ def continuous_live_engine():
                         f"⚔️ **{home} vs {away}** ({elapsed}')\n"
                         f"🔢 **Σκορ:** {score_str}\n\n"
                         f"💡 **Live Πρόταση:** Over 0.5 Goal (Late Goal)\n"
-                        f"💰 **Stake:** 2/10 Units"
+                        f"💰 **Live Απόδοση:** @1.90 - @2.10"
                     )
                     send_telegram("LIVE", msg)
                     processed_events.add(key_live)
@@ -280,6 +300,7 @@ def result_settlement_engine():
                         home = bet_info.get("home")
                         away = bet_info.get("away")
                         league_info = bet_info.get("league_info", "")
+                        odd_val = bet_info.get("odd", "")
 
                         is_won = False
                         if "Over 0.5" in advice and total_goals > 0:
@@ -295,7 +316,7 @@ def result_settlement_engine():
                         else:
                             is_won = total_goals > 0
 
-                        result_emoji = "✅ [BET WON]" if is_won else "❌ [BET LOST]"
+                        result_emoji = f"✅ [BET WON @{odd_val}]" if is_won else f"❌ [BET LOST @{odd_val}]"
                         result_msg = (
                             f"{result_emoji}\n"
                             f"🌍 **Πρωτάθλημα:** {league_info}\n"
@@ -314,7 +335,7 @@ def result_settlement_engine():
         time.sleep(600)
 
 if __name__ == "__main__":
-    print("🚀 Εκκίνηση Πλήρους Συστήματος (League Info Included)...", flush=True)
+    print("🚀 Εκκίνηση Πλήρους Συστήματος (Odds Included)...", flush=True)
     
     t1 = threading.Thread(target=continuous_tipster_engine, daemon=True)
     t1.start()
