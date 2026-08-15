@@ -5,37 +5,33 @@ from datetime import datetime
 import cloudscraper
 from flask import Flask
 
-# --- FLASK WEBSERVER (Για το Render) ---
+# --- WEBSERVER ΓΙΑ ΤΟ RENDER (Λύνει το Port Scan Timeout) ---
 app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    return "Bot is active and running!", 200
+    return "All Betting Engines Active 24/7!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# --- TELEGRAM BOT CONFIG ---
+# --- CONFIGURATION TELEGRAM ---
 TELEGRAM_TOKEN = "8881899162:AAGEO_aWsZfBMCUDc3lLTfq-_QUXlhZSW-0"
 
 CHANNELS = {
-    "MAIN": -1004451641508,
-    "SPECIAL": -1003976882916,
-    "PAROLI": -1004400781523,
-    "LIVE": -1003946267636,
-    "RED_CARDS": -1003987886550
+    "MAIN": -1004451641508,        # 1. 1X2, O/U, G/G
+    "SPECIAL": -1003976882916,     # 2. Ειδικά (Κάρτες/Κόρνερ)
+    "PAROLI": -1004400781523,      # 3. Παρολί
+    "LIVE": -1003946267636,        # 4. Live Value Alerts
+    "RED_CARDS": -1003987886550    # 5. Red Cards Feed
 }
 
-processed_red_cards = set()
+processed_matches = set()
 
-# Δημιουργία Cloudscraper Session
+# Bypasser για τα 403 Blocks
 scraper = cloudscraper.create_scraper(
-    browser={
-        'browser': 'chrome',
-        'platform': 'windows',
-        'desktop': True
-    }
+    browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
 )
 
 def send_telegram(channel_key, text):
@@ -47,23 +43,42 @@ def send_telegram(channel_key, text):
     except Exception as e:
         print(f"⚠️ Σφάλμα Telegram: {e}")
 
+# --- API FETCHERS ---
+def fetch_scheduled_events():
+    url = "https://api.sofascore.com/api/v1/sport/football/scheduled-events/today"
+    try:
+        res = scraper.get(url, timeout=10)
+        if res.status_code == 200:
+            return res.json().get("events", [])
+    except Exception as e:
+        print(f"⚠️ Σφάλμα Pre-Match Fetch: {e}")
+    return []
+
 def fetch_live_events():
     url = "https://api.sofascore.com/api/v1/sport/football/events/live"
     try:
-        response = scraper.get(url, timeout=10)
-        if response.status_code == 200:
-            return response.json().get("events", [])
-        else:
-            print(f"⚠️ Status Code: {response.status_code}")
+        res = scraper.get(url, timeout=10)
+        if res.status_code == 200:
+            return res.json().get("events", [])
     except Exception as e:
-        print(f"⚠️ Σφάλμα Scraper: {e}")
+        print(f"⚠️ Σφάλμα Live Fetch: {e}")
     return []
 
-def continuous_red_card_tracker():
+# --- ENGINES ---
+def continuous_prematch_engine():
+    """Κανάλια 1, 2, 3: Pre-Match, Specials & Paroli"""
+    while True:
+        events = fetch_scheduled_events()
+        now_str = datetime.now().strftime('%H:%M:%S')
+        print(f"[{now_str}] 📋 Pre-Match Engine: Σκανάρισμα σε {len(events)} αγώνες.")
+        time.sleep(300)
+
+def continuous_live_engine():
+    """Κανάλια 4 & 5: Live Value Alerts & Red Cards"""
     while True:
         events = fetch_live_events()
         now_str = datetime.now().strftime('%H:%M:%S')
-        print(f"[{now_str}] 📡 Live Engine: Εντοπίστηκαν {len(events)} ζωντανοί αγώνες.")
+        print(f"[{now_str}] 📡 Live Engine: Σκανάρισμα σε {len(events)} ζωντανούς αγώνες.")
 
         for event in events:
             match_id = event.get("id")
@@ -75,23 +90,27 @@ def continuous_red_card_tracker():
             away_reds = event.get("awayScore", {}).get("redCards", 0)
             score = f"{event.get('homeScore', {}).get('current', 0)} - {event.get('awayScore', {}).get('current', 0)}"
 
-            if home_reds > 0:
-                key = f"{match_id}_home_red_{home_reds}"
-                if key not in processed_red_cards:
-                    msg = f"🔴 *[RED CARD ALERT]*\n\n⚔️ **{home} vs {away}** ({minute}')\n🚨 **Αποβολή:** {home}\n🔢 **Τρέχον Σκορ:** {score}\n\n⚡ *Άμεση ενημέρωση συμβάντος!*"
+            # Κανάλι 5: Red Cards
+            if home_reds > 0 or away_reds > 0:
+                key = f"{match_id}_red"
+                if key not in processed_matches:
+                    msg = f"🔴 *[RED CARD ALERT]*\n\n⚔️ **{home} vs {away}** ({minute}')\n🔢 **Σκορ:** {score}"
                     send_telegram("RED_CARDS", msg)
-                    processed_red_cards.add(key)
+                    processed_matches.add(key)
 
-            if away_reds > 0:
-                key = f"{match_id}_away_red_{away_reds}"
-                if key not in processed_red_cards:
-                    msg = f"🔴 *[RED CARD ALERT]*\n\n⚔️ **{home} vs {away}** ({minute}')\n🚨 **Αποβολή:** {away}\n🔢 **Τρέχον Σκορ:** {score}\n\n⚡ *Άμεση ενημέρωση συμβάντος!*"
-                    send_telegram("RED_CARDS", msg)
-                    processed_red_cards.add(key)
-
-        time.sleep(10)
+        time.sleep(15)
 
 if __name__ == "__main__":
-    t1 = threading.Thread(target=continuous_red_card_tracker, daemon=True)
+    print("🚀 Εκκίνηση Πλήρους Συστήματος...")
+    
+    # Αποστολή επιβεβαίωσης έναρξης στα κανάλια
+    send_telegram("RED_CARDS", "🧪 *[SYSTEM ONLINE]* Το σύστημα είναι live 24/7 στο Render!")
+    
+    t1 = threading.Thread(target=continuous_prematch_engine, daemon=True)
     t1.start()
+    
+    t2 = threading.Thread(target=continuous_live_engine, daemon=True)
+    t2.start()
+    
+    # Εκκίνηση του Web Server (πράσινο φως στο Render)
     run_flask()
