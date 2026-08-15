@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    return "Auto-Tipster with Real Odds Engine Active 24/7!", 200
+    return "Auto-Tipster & Red Card Engine Active 24/7!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -72,7 +72,7 @@ def fetch_odds(fixture_id):
                                 return values[0].get("odd", "1.85")
     except Exception as e:
         print(f"⚠️ Σφάλμα Odds Fetch: {e}", flush=True)
-    return "1.80"  # Default fallback απόδοση αν δεν είναι διαθέσιμη στο live feed
+    return "1.80"
 
 def fetch_upcoming_fixtures():
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -110,13 +110,13 @@ def fetch_fixture_by_id(fixture_id):
 # --- ENGINES ---
 
 def continuous_tipster_engine():
-    """Tipster Engine: Εμφάνιση Αποδόσεων αντί για Stake"""
+    """Tipster Engine: Ανάλυση αγώνων επόμενων 2 ωρών"""
     while True:
         fixtures = fetch_upcoming_fixtures()
         now_utc = datetime.now(timezone.utc)
         two_hours_later = now_utc + timedelta(hours=2)
         
-        print(f"[{now_utc.strftime('%H:%M:%S')}] 🤖 Tipster Engine: Ανάλυση αγώνων & αποδόσεων...", flush=True)
+        print(f"[{now_utc.strftime('%H:%M:%S')}] 🤖 Tipster Engine: Ανάλυση αγώνων...", flush=True)
         paroli_candidates = []
 
         for fix in fixtures:
@@ -207,7 +207,7 @@ def continuous_tipster_engine():
         time.sleep(1800)
 
 def continuous_live_engine():
-    """Live Engine: Tipster Alerts & Red Card Radar"""
+    """Live Engine: Tipster Alerts & Red Card Radar (Strict Single Notification)"""
     while True:
         fixtures = fetch_live_fixtures()
 
@@ -248,29 +248,33 @@ def continuous_live_engine():
                         "advice": "Over 0.5 Goal"
                     }
 
-            # 5. LIVE RED CARD RADAR
+            # 5. LIVE RED CARD RADAR (Στέλνει ΑΥΣΤΗΡΑ 1 φορά τη στιγμή που συμβαίνει)
             events = fix.get("events", [])
             for event in events:
                 if event.get("type") == "Card" and event.get("detail") in ["Red Card", "Yellow 2nd Card"]:
                     team_name = event.get("team", {}).get("name")
                     player = event.get("player", {}).get("name", "Player")
                     card_type = "Απευθείας Κόκκινη" if event.get("detail") == "Red Card" else "2η Κίτρινη"
-                    event_time = event.get("time", {}).get("elapsed", elapsed)
+                    card_time = event.get("time", {}).get("elapsed", 0)
 
-                    key_red = f"red_{fixture_id}_{event_time}_{team_name}"
+                    # Σταθερό κλειδί αναγνώρισης (χωρίς το τρέχον λεπτό του αγώνα)
+                    key_red = f"red_{fixture_id}_{team_name}_{card_time}"
 
                     if key_red not in processed_events:
-                        msg = (
-                            f"🚨 *[RED CARD ALERT]* 🚨\n\n"
-                            f"🌍 **Πρωτάθλημα:** {league_info}\n"
-                            f"⚔️ **{home} {score_str} {away}** ({elapsed}')\n\n"
-                            f"🔴 **Ομάδα:** {team_name}\n"
-                            f"👤 **Παίκτης:** {player}\n"
-                            f"📌 **Τύπος:** {card_type} ({event_time}')\n\n"
-                            f"⚡ *Live Opportunity Alert*"
-                        )
-                        send_telegram("RED_CARDS", msg)
-                        processed_events.add(key_red)
+                        processed_events.add(key_red)  # Κλειδώνει αμέσως
+                        
+                        # Στέλνει ΜΟΝΟ αν η αποβολή έγινε τώρα (μέσα στα τελευταία 3 λεπτά)
+                        if elapsed > 0 and (elapsed - card_time) <= 3:
+                            msg = (
+                                f"🚨 *[RED CARD ALERT]* 🚨\n\n"
+                                f"🌍 **Πρωτάθλημα:** {league_info}\n"
+                                f"⚔️ **{home} {score_str} {away}** ({elapsed}')\n\n"
+                                f"🔴 **Ομάδα:** {team_name}\n"
+                                f"👤 **Παίκτης:** {player}\n"
+                                f"📌 **Τύπος:** {card_type} ({card_time}')\n\n"
+                                f"⚡ *Live Opportunity Alert*"
+                            )
+                            send_telegram("RED_CARDS", msg)
 
         time.sleep(15)
 
@@ -335,7 +339,7 @@ def result_settlement_engine():
         time.sleep(600)
 
 if __name__ == "__main__":
-    print("🚀 Εκκίνηση Πλήρους Συστήματος (Odds Included)...", flush=True)
+    print("🚀 Εκκίνηση Πλήρους Συστήματος...", flush=True)
     
     t1 = threading.Thread(target=continuous_tipster_engine, daemon=True)
     t1.start()
