@@ -1,8 +1,22 @@
+import os
 import requests
 import time
 import threading
 from datetime import datetime
+from flask import Flask
 
+# --- FLASK SERVER FOR RENDER HEALTH CHECK ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running 24/7!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# --- TELEGRAM BOT LOGIC ---
 TELEGRAM_TOKEN = "8881899162:AAGEO_aWsZfBMCUDc3lLTfq-_QUXlhZSW-0"
 
 CHANNELS = {
@@ -70,11 +84,13 @@ def continuous_red_card_tracker():
 
         time.sleep(10)
 
-print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 ΕΝΕΡΓΟΠΟΙΗΣΗ RENDER ENGINE!")
-send_telegram("RED_CARDS", "🧪 *[RENDER ENGINE ONLINE]* Το bot ξεκίνησε στο Render!")
-
-t1 = threading.Thread(target=continuous_red_card_tracker, daemon=True)
-t1.start()
-
-while True:
-    time.sleep(1)
+if __name__ == "__main__":
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 ΕΝΕΡΓΟΠΟΙΗΣΗ RENDER WEB ENGINE!")
+    send_telegram("RED_CARDS", "🧪 *[RENDER ENGINE ONLINE]* Το bot τρέχει σταθερά στο Render!")
+    
+    # Εκκίνηση Scraper σε ξεχωριστό Thread
+    t1 = threading.Thread(target=continuous_red_card_tracker, daemon=True)
+    t1.start()
+    
+    # Εκκίνηση Web Server για το Render
+    run_flask()
