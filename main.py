@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from flask import Flask
 
 # --- WEBSERVER ΓΙΑ ΤΟ RENDER ---
@@ -26,11 +26,11 @@ HEADERS = {
 }
 
 CHANNELS = {
-    "MAIN": -1004451641508,        # 1. Pre-Match Picks (1X2, Over/Under, GG)
-    "SPECIAL": -1003976882916,     # 2. Ειδικά (Κάρτες, Κόρνερ)
+    "MAIN": -1004451641508,        # 1. Pre-Match Picks
+    "SPECIAL": -1003976882916,     # 2. Ειδικά
     "PAROLI": -1004400781523,      # 3. Παρολί
     "LIVE": -1003946267636,        # 4. Live Value Alerts
-    "RED_CARDS": -1003987886550    # 5. Red Cards Feed
+    "RED_CARDS": -1003987886550    # 5. Red Cards
 }
 
 processed_events = set()
@@ -45,7 +45,7 @@ def send_telegram(channel_key, text):
 
 # --- API CALLS ---
 def fetch_today_fixtures():
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     url = f"https://{API_HOST}/fixtures?date={today}"
     try:
         res = requests.get(url, headers=HEADERS, timeout=10)
@@ -67,49 +67,75 @@ def fetch_live_fixtures():
 
 # --- ENGINES ---
 def continuous_prematch_engine():
-    """Κανάλια 1, 2, 3: Pre-Match, Specials & Paroli"""
+    """Κανάλια 1, 2, 3: Pre-Match, Specials & Paroli (Μόνο για αγώνες επόμενης 1 ώρας)"""
     while True:
         fixtures = fetch_today_fixtures()
+        now_utc = datetime.now(timezone.utc)
+        one_hour_later = now_utc + timedelta(hours=1)
         now_str = datetime.now().strftime('%H:%M:%S')
-        print(f"[{now_str}] 📋 Pre-Match Engine: Σκανάρισμα σε {len(fixtures)} σημερινούς αγώνες.", flush=True)
         
-        paroli_picks = []
+        print(f"[{now_str}] 📋 Pre-Match Engine: Έλεγχος αγώνων που ξεκινάνε την επόμενη 1 ώρα...", flush=True)
+        
+        paroli_candidates = []
 
         for fix in fixtures:
             fixture_id = fix.get("fixture", {}).get("id")
-            teams = fix.get("teams", {})
-            home = teams.get("home", {}).get("name", "Home")
-            away = teams.get("away", {}).get("name", "Away")
-            status = fix.get("fixture", {}).get("status", {}).get("short")
+            status = fix.get("fixture", {}).get("short")
+            fixture_date_str = fix.get("fixture", {}).get("date")
 
-            # Επεξεργασία μόνο για αγώνες που δεν έχουν ξεκινήσει ακόμα (NS = Not Started)
-            if status == "NS":
-                key_main = f"{fixture_id}_main"
-                key_spec = f"{fixture_id}_spec"
+            if status == "NS" and fixture_date_str:
+                # Μετατροπή ημερομηνίας αγώνα σε UTC datetime
+                fixture_time = datetime.fromisoformat(fixture_date_str.replace("Z", "+00:00"))
 
-                # 1. Κανάλι MAIN (1X2, Over/Under, G/G)
-                if key_main not in processed_events:
-                    msg = f"⚽ *[PRE-MATCH PICK]*\n\n⚔️ **{home} vs {away}**\n💡 **Πρόταση:** Over 2.5 Goals / Goal-Goal\n📊 *Αναλύθηκε μέσω API-Football*"
-                    send_telegram("MAIN", msg)
-                    processed_events.add(key_main)
+                # Φίλτρο: Αγώνες που ξεκινάνε μεταξύ ΤΩΡΑ και ΕΠΟΜΕΝΗΣ 1 ΩΡΑΣ
+                if now_utc <= fixture_time <= one_hour_later:
+                    teams = fix.get("teams", {})
+                    home = teams.get("home", {}).get("name", "Home")
+                    away = teams.get("away", {}).get("name", "Away")
+                    time_str = fixture_time.strftime('%H:%M UTC')
 
-                # 2. Κανάλι SPECIAL (Κάρτες/Κόρνερ)
-                if key_spec not in processed_events:
-                    msg = f"🎯 *[SPECIAL BET]*\n\n⚔️ **{home} vs {away}**\n🟨 **Πρόταση:** Over 4.5 Κίτρινες Κάρτες\n🚩 **Κόρνερ:** Over 8.5"
-                    send_telegram("SPECIAL", msg)
-                    processed_events.add(key_spec)
+                    key_main = f"main_{fixture_id}"
+                    key_spec = f"spec_{fixture_id}"
 
-                # Συλλογή για Παρολί (μέχρι 3 αγώνες)
-                if len(paroli_picks) < 3 and f"{fixture_id}_paroli" not in processed_events:
-                    paroli_picks.append(f"• **{home} vs {away}**: Over 1.5 Goals")
-                    processed_events.add(f"{fixture_id}_paroli")
+                    # 1. Κανάλι MAIN (Πολλαπλές προτάσεις ανά αγώνα)
+                    if key_main not in processed_events:
+                        msg = (
+                            f"⏰ *[MATCH IN 1 HOUR]* ({time_str})\n"
+                            f"⚔️ **{home} vs {away}**\n\n"
+                            f"💡 **Προτάσεις:**\n"
+                            f"• Over 2.5 Goals\n"
+                            f"• Both Teams To Score (Goal/Goal)\n"
+                            f"• 1X (Home Win or Draw)\n\n"
+                            f"📊 *Official API Feed*"
+                        )
+                        send_telegram("MAIN", msg)
+                        processed_events.add(key_main)
 
-        # 3. Κανάλι PAROLI (Σύνθετο δελτίο)
-        if len(paroli_picks) >= 2:
-            paroli_msg = "🎟️ *[DAILY PAROLI]*\n\n" + "\n".join(paroli_picks) + "\n\n🔥 **Συνολική Απόδοση:** ~3.50"
+                    # 2. Κανάλι SPECIAL (Πολλαπλές ειδικές προτάσεις ανά αγώνα)
+                    if key_spec not in processed_events:
+                        msg = (
+                            f"🎯 *[SPECIAL BETS - 1 HOUR LEFT]*\n"
+                            f"⚔️ **{home} vs {away}**\n\n"
+                            f"🟨 **Κάρτες:** Over 4.5 Κίτρινες Κάρτες\n"
+                            f"🚩 **Κόρνερ:** Over 8.5 Συνολικά Κόρνερ\n"
+                            f"⚽ **Anytime Scorer:** Πρώτο Ημίχρονο Over 0.5 Goal"
+                        )
+                        send_telegram("SPECIAL", msg)
+                        processed_events.add(key_spec)
+
+                    # Συλλογή για Παρολί
+                    key_paroli_item = f"paroli_item_{fixture_id}"
+                    if key_paroli_item not in processed_events and len(paroli_candidates) < 3:
+                        paroli_candidates.append(f"• **{home} vs {away}**: Over 1.5 Goals")
+                        processed_events.add(key_paroli_item)
+
+        # 3. Κανάλι PAROLI (Σύνθεση όταν υπάρχουν διαθέσιμοι αγώνες 1 ώρας)
+        if len(paroli_candidates) >= 2:
+            paroli_msg = "🎟️ *[PAROLI - UPCOMING MATCHES]*\n\n" + "\n".join(paroli_candidates) + "\n\n🔥 **Συνολική Απόδοση:** ~3.20"
             send_telegram("PAROLI", paroli_msg)
 
-        time.sleep(1800)  # Σκανάρισμα ανά 30 λεπτά
+        # Έλεγχος ανά 15 λεπτά για να πιάνει συνεχώς το παράθυρο της 1 ώρας
+        time.sleep(900)
 
 def continuous_live_engine():
     """Κανάλια 4 & 5: Live Value Alerts & Red Cards"""
@@ -127,38 +153,36 @@ def continuous_live_engine():
             goals = fix.get("goals", {})
             score_str = f"{goals.get('home', 0)} - {goals.get('away', 0)}"
 
-            # 4. Κανάλι LIVE (Live Value Alerts π.χ. στο 70' με 0-0)
+            # 4. Κανάλι LIVE (Alert στο 65'-75' με 0-0)
             if 65 <= elapsed <= 75 and goals.get('home', 0) + goals.get('away', 0) == 0:
-                key_live = f"{fixture_id}_live_val"
+                key_live = f"live_val_{fixture_id}"
                 if key_live not in processed_events:
                     msg = f"⚡ *[LIVE VALUE ALERT]*\n\n⚔️ **{home} vs {away}** ({elapsed}')\n🔢 **Σκορ:** {score_str}\n💡 **Πρόταση:** Over 0.5 Late Goal"
                     send_telegram("LIVE", msg)
                     processed_events.add(key_live)
 
-            # 5. Κανάλι RED CARDS (Αποβολές)
+            # 5. Κανάλι RED CARDS (Αποβολές - Στέλνει αμέσως τη στιγμή της κόκκινης)
             events = fix.get("events", [])
             for event in events:
                 if event.get("type") == "Card" and event.get("detail") in ["Red Card", "Yellow 2nd Card"]:
                     team_name = event.get("team", {}).get("name")
                     player = event.get("player", {}).get("name", "Player")
-                    key_red = f"{fixture_id}_red_{event.get('time', {}).get('elapsed')}_{team_name}"
+                    event_time = event.get("time", {}).get("elapsed", elapsed)
+                    key_red = f"red_{fixture_id}_{event_time}_{team_name}"
 
                     if key_red not in processed_events:
                         msg = f"🔴 *[RED CARD ALERT]*\n\n⚔️ **{home} vs {away}** ({elapsed}')\n🚨 **Αποβολή:** {team_name} ({player})\n🔢 **Σκορ:** {score_str}\n\n⚡ *Official Feed*"
                         send_telegram("RED_CARDS", msg)
                         processed_events.add(key_red)
 
-        time.sleep(20)  # Σκανάρισμα live κάθε 20 δευτερόλεπτα
+        time.sleep(20)  # Live σκανάρισμα κάθε 20 δευτερόλεπτα
 
 if __name__ == "__main__":
-    print("🚀 Εκκίνηση Πλήρους Συστήματος API-Football (5/5 Κανάλια)...", flush=True)
-    send_telegram("RED_CARDS", "🧪 *[ALL ENGINES ONLINE]* Το σύστημα τροφοδοτεί πλέον και τα 5 κανάλια!")
+    print("🚀 Εκκίνηση Πλήρους Συστήματος API-Football (1-Hour Window Engine)...", flush=True)
     
-    # Εκκίνηση Pre-Match Engine
     t1 = threading.Thread(target=continuous_prematch_engine, daemon=True)
     t1.start()
     
-    # Εκκίνηση Live Engine
     t2 = threading.Thread(target=continuous_live_engine, daemon=True)
     t2.start()
     
