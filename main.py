@@ -1,22 +1,22 @@
 import os
-import requests
 import time
 import threading
 from datetime import datetime
+import cloudscraper
 from flask import Flask
 
-# --- FLASK WEBSERVER (Για να μην χτυπάει το Render Port Check) ---
+# --- FLASK WEBSERVER (Για το Render) ---
 app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    return "Bot is running 24/7!", 200
+    return "Bot is active and running!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# --- TELEGRAM BOT LOGIC ---
+# --- TELEGRAM BOT CONFIG ---
 TELEGRAM_TOKEN = "8881899162:AAGEO_aWsZfBMCUDc3lLTfq-_QUXlhZSW-0"
 
 CHANNELS = {
@@ -29,7 +29,17 @@ CHANNELS = {
 
 processed_red_cards = set()
 
+# Δημιουργία Cloudscraper Session
+scraper = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True
+    }
+)
+
 def send_telegram(channel_key, text):
+    import requests
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHANNELS[channel_key], "text": text, "parse_mode": "Markdown"}
     try:
@@ -39,24 +49,21 @@ def send_telegram(channel_key, text):
 
 def fetch_live_events():
     url = "https://api.sofascore.com/api/v1/sport/football/events/live"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = scraper.get(url, timeout=10)
         if response.status_code == 200:
             return response.json().get("events", [])
         else:
             print(f"⚠️ Status Code: {response.status_code}")
     except Exception as e:
-        print(f"⚠️ Σφάλμα λήψης: {e}")
+        print(f"⚠️ Σφάλμα Scraper: {e}")
     return []
 
 def continuous_red_card_tracker():
     while True:
         events = fetch_live_events()
         now_str = datetime.now().strftime('%H:%M:%S')
-        print(f"[{now_str}] 📡 Render Engine: Εντοπίστηκαν {len(events)} ζωντανοί αγώνες σε εξέλιξη.")
+        print(f"[{now_str}] 📡 Live Engine: Εντοπίστηκαν {len(events)} ζωντανοί αγώνες.")
 
         for event in events:
             match_id = event.get("id")
@@ -85,12 +92,6 @@ def continuous_red_card_tracker():
         time.sleep(10)
 
 if __name__ == "__main__":
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 ΕΝΕΡΓΟΠΟΙΗΣΗ RENDER ENGINE!")
-    send_telegram("RED_CARDS", "🧪 *[RENDER ONLINE]* Το bot ξεκίνησε στο Render!")
-    
-    # Εκκίνηση Scraper σε background thread
     t1 = threading.Thread(target=continuous_red_card_tracker, daemon=True)
     t1.start()
-    
-    # Εκκίνηση Flask Server για να πράσινισει το Health Check του Render
     run_flask()
