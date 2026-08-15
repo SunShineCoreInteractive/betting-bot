@@ -5,12 +5,12 @@ import threading
 from datetime import datetime
 from flask import Flask
 
-# --- FLASK SERVER FOR RENDER HEALTH CHECK ---
+# --- FLASK WEBSERVER (Για να μην χτυπάει το Render Port Check) ---
 app = Flask(__name__)
 
 @app.route('/')
-def home():
-    return "Bot is running 24/7!"
+def health_check():
+    return "Bot is running 24/7!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -85,12 +85,12 @@ def continuous_red_card_tracker():
         time.sleep(10)
 
 if __name__ == "__main__":
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 ΕΝΕΡΓΟΠΟΙΗΣΗ RENDER WEB ENGINE!")
-    send_telegram("RED_CARDS", "🧪 *[RENDER ENGINE ONLINE]* Το bot τρέχει σταθερά στο Render!")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 ΕΝΕΡΓΟΠΟΙΗΣΗ RENDER ENGINE!")
+    send_telegram("RED_CARDS", "🧪 *[RENDER ONLINE]* Το bot ξεκίνησε στο Render!")
     
-    # Εκκίνηση Scraper σε ξεχωριστό Thread
+    # Εκκίνηση Scraper σε background thread
     t1 = threading.Thread(target=continuous_red_card_tracker, daemon=True)
     t1.start()
     
-    # Εκκίνηση Web Server για το Render
+    # Εκκίνηση Flask Server για να πράσινισει το Health Check του Render
     run_flask()
