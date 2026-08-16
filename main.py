@@ -49,7 +49,7 @@ def startup():
     # μπορείς να δεις αν υπάρχει Stoiximan/Novibet/κλπ χωρίς κανένα άλλο εργαλείο.
     try:
         bookmakers = api_football.get_bookmakers()
-        names = sorted(b["name"] for b in bookmakers)
+        names = sorted(b["name"] for b in bookmakers if b.get("name"))
         logger.info("Διαθέσιμα bookmakers (%s): %s", len(names), ", ".join(names))
     except Exception:
         logger.exception("Δεν κατάφερα να τραβήξω τη λίστα bookmakers")
