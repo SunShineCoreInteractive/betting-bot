@@ -33,8 +33,25 @@ TIER1_ONLY_COUNTRIES = {
     "qatar", "united-arab-emirates", "saudi-arabia",
 }
 
-# Χώρες όπου θέλουμε ρητά και κύπελλο (πέρα από tier1/tier2)
-CUP_REQUIRED_COUNTRIES = TIER1_ONLY_COUNTRIES | {"__all_europe__"}
+# Χώρες από τη ρητή λίστα ΧΩΡΙΣ κύπελλο (ζητήθηκε ρητά μόνο tier1, χωρίς αναφορά σε κύπελλο)
+TIER1_ONLY_NO_CUP = {"australia", "japan", "china"}
+
+# Ολόκληρη η Ευρώπη (μέλη UEFA) -- εδώ θέλουμε tier1 + tier2 + κύπελλο για ΟΛΕΣ.
+# Ονόματα όπως τα επιστρέφει το API-Football (country.name), lowercase + κενά->παύλες.
+# ΠΡΟΣ ΕΠΙΒΕΒΑΙΩΣΗ στο πρώτο πραγματικό log πριν το θεωρήσουμε τελικό.
+EUROPE_COUNTRIES = {
+    "england", "spain", "italy", "germany", "france", "portugal",
+    "netherlands", "belgium", "turkey", "greece", "scotland",
+    "switzerland", "austria", "sweden", "norway", "denmark", "poland",
+    "wales", "northern-ireland", "republic-of-ireland", "ireland",
+    "russia", "ukraine", "czech-republic", "slovakia", "hungary",
+    "romania", "bulgaria", "serbia", "croatia", "slovenia",
+    "bosnia-and-herzegovina", "north-macedonia", "albania", "montenegro",
+    "kosovo", "moldova", "belarus", "lithuania", "latvia", "estonia",
+    "finland", "iceland", "luxembourg", "malta", "cyprus", "georgia",
+    "armenia", "azerbaijan", "kazakhstan", "andorra", "san-marino",
+    "faroe-islands", "gibraltar", "liechtenstein",
+}
 
 # Λέξεις που δείχνουν διεθνή/ηπειρωτική διοργάνωση club-level
 INTERNATIONAL_CLUB_KEYWORDS = [
@@ -113,17 +130,25 @@ def classify_leagues():
             result["national_team"].append(league_id)
             continue
 
+        in_europe = country_name in EUROPE_COUNTRIES
+        in_explicit_list = country_name in TIER1_ONLY_COUNTRIES
+
+        # Αγνόησε εντελώς χώρες που δεν είναι ούτε Ευρώπη ούτε στη ρητή λίστα
+        if not in_europe and not in_explicit_list:
+            continue
+
         if is_cup_type:
-            # Κύπελλο χώρας -- το κρατάμε αν είναι Ευρώπη ή στη ρητή λίστα χωρών
-            result["domestic_cups"].append(league_id)
+            wants_cup = in_europe or (in_explicit_list and country_name not in TIER1_ONLY_NO_CUP)
+            if wants_cup:
+                result["domestic_cups"].append(league_id)
             continue
 
         # Domestic league -- tier 1 ή tier 2
-        if country_name in TIER1_ONLY_COUNTRIES:
+        if in_explicit_list:
             if not _is_tier2(name_l):
                 result["tier1"].append(league_id)
-            # tier2 αγνοείται ρητά για αυτές τις χώρες
-        else:
+            # tier2 αγνοείται ρητά για τις χώρες της ρητής λίστας
+        elif in_europe:
             if _is_tier2(name_l):
                 result["tier2"].append(league_id)
             else:

@@ -24,6 +24,15 @@ _cache = {}
 _daily_call_count = 0
 _daily_count_date = None
 
+# ── Throttling ──────────────────────────────────────────────────
+# Το πλάνο Pro του API-Football έχει όριο κλήσεων ΑΝΑ ΛΕΠΤΟ (ξεχωριστό από το
+# ημερήσιο). Αν αναλύουμε πολλούς αγώνες σε ένα κύκλο (π.χ. πολλά live match
+# ταυτόχρονα), οι κλήσεις πέφτουν όλες μαζί μέσα σε 1-2 δευτερόλεπτα και
+# σκάει το ανά-λεπτό όριο. Εδώ επιβάλλουμε ελάχιστο διάστημα ανάμεσα σε
+# διαδοχικές κλήσεις, ώστε να "απλώνονται" ομαλά.
+MIN_SECONDS_BETWEEN_CALLS = 0.35   # ~170 κλήσεις/λεπτό μέγιστο -- συντηρητικό όριο ασφαλείας
+_last_call_time = 0.0
+
 
 def _track_call():
     global _daily_call_count, _daily_count_date
@@ -40,6 +49,16 @@ def get_daily_call_count():
     return _daily_call_count
 
 
+def _throttle():
+    """Περιμένει όσο χρειάζεται ώστε να μην ξεπεράσουμε το ανά-λεπτό όριο του API."""
+    global _last_call_time
+    elapsed = time.time() - _last_call_time
+    wait = MIN_SECONDS_BETWEEN_CALLS - elapsed
+    if wait > 0:
+        time.sleep(wait)
+    _last_call_time = time.time()
+
+
 def _get(endpoint, params=None, cache_key=None, cache_hours=0):
     """Βασική GET κλήση με προαιρετικό caching."""
     if cache_key and cache_key in _cache:
@@ -47,6 +66,7 @@ def _get(endpoint, params=None, cache_key=None, cache_hours=0):
         if (time.time() - ts) < cache_hours * 3600:
             return data
 
+    _throttle()
     url = f"{config.API_FOOTBALL_BASE_URL}/{endpoint}"
     resp = _session.get(url, params=params or {}, timeout=20)
     _track_call()
@@ -55,6 +75,12 @@ def _get(endpoint, params=None, cache_key=None, cache_hours=0):
 
     if payload.get("errors"):
         logger.warning("API-Football errors στο %s: %s", endpoint, payload["errors"])
+        if "rateLimit" in payload["errors"]:
+            # Σκάσαμε το ανά-λεπτό όριο παρά το throttle -- περίμενε λίγο παραπάνω
+            # και ξαναδοκίμασε ΜΙΑ φορά, ώστε ο τρέχων κύκλος να μην χάσει δεδομένα.
+            logger.warning("Rate limit -- αναμονή 5s και retry...")
+            time.sleep(5)
+            return _get(endpoint, params=params, cache_key=cache_key, cache_hours=cache_hours)
 
     data = payload.get("response", [])
 

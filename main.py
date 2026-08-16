@@ -63,8 +63,9 @@ def _kickoff_str(iso_date):
     return dt.strftime("%H:%M")
 
 
-def _get_predictions_for_fixture(fx):
-    """Τρέχει το μοντέλο goals/BTTS για ένα fixture. Επιστρέφει (predictions, odds_lookup)."""
+def _get_predictions_for_fixture(fx, live=False):
+    """Τρέχει το μοντέλο goals/BTTS για ένα fixture. Επιστρέφει predictions.
+    live=True -> παίρνει LIVE αποδόσεις αντί για pre-match."""
     home_recent = api_football.get_team_recent_fixtures(fx["home_id"])
     away_recent = api_football.get_team_recent_fixtures(fx["away_id"])
 
@@ -74,7 +75,10 @@ def _get_predictions_for_fixture(fx):
 
     lam_home, lam_away = analysis.compute_expected_goals(home_form, away_form)
 
-    odds_response = api_football.get_prematch_odds(fx["id"])
+    if live:
+        odds_response = api_football.get_live_odds(fx["id"])
+    else:
+        odds_response = api_football.get_prematch_odds(fx["id"])
     odds_lookup = odds_parser.parse_goals_and_btts_odds(
         odds_response[0] if odds_response else {}
     )
@@ -208,7 +212,7 @@ def run_live_check():
         live_ids.add(fx["id"])
 
         try:
-            predictions = _get_predictions_for_fixture(fx)
+            predictions = _get_predictions_for_fixture(fx, live=True)
         except Exception:
             logger.exception("Σφάλμα live ανάλυσης fixture %s", fx["id"])
             continue
