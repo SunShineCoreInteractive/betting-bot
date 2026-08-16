@@ -76,3 +76,8 @@ MIN_SAMPLE_SIZE_CORNERS_CARDS = 4
 LEAGUE_AVG_CORNERS = 10.0           # τυπικός μέσος όρος συνολικών κόρνερ/αγώνα
 CORNER_LINES = [8.5, 9.5, 10.5]
 CARD_LINES = [2.5, 3.5, 4.5]
+
+# ── Σκόρερ (Φάση 2β) ─────────────────────────────────────────────
+PLAYER_STATS_CACHE_HOURS = 24
+SCORER_MIN_MINUTES = 450          # ελάχιστα λεπτά συμμετοχής season για αξιόπιστη εκτίμηση (~5 αγώνες)
+SCORER_NAME_MATCH_THRESHOLD = 0.72   # ελάχιστη ομοιότητα ονόματος (0-1) για ταίριασμα με το market

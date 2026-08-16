@@ -194,6 +194,54 @@ def get_fixtures_by_ids(fixture_ids):
     return {r["fixture"]["id"]: r for r in results}
 
 
+def get_fixture_lineups(fixture_id):
+    """Επίσημο line-up ενός αγώνα -- διαθέσιμο συνήθως ~1 ώρα πριν την έναρξη."""
+    return _get("fixtures/lineups", params={"fixture": fixture_id})
+
+
+def get_team_players_season_stats(team_id, league_id, season):
+    """
+    Στατιστικά ΟΛΩΝ των παικτών μιας ομάδας για τη σεζόν (γκολ, λεπτά, συμμετοχές).
+    Επιστρέφει dict: {player_id: {"name":, "goals":, "minutes":, "appearances":}}.
+    Cache 24 ωρών -- ίδιο μοτίβο με τα team stats.
+    """
+    cache_key = f"player_stats_{team_id}_{league_id}_{season}"
+    if cache_key in _cache:
+        ts, data = _cache[cache_key]
+        if (time.time() - ts) < config.PLAYER_STATS_CACHE_HOURS * 3600:
+            return data
+
+    result = {}
+    page = 1
+    while True:
+        payload = _get("players", params={"team": team_id, "league": league_id, "season": season, "page": page})
+        if not payload:
+            break
+        for entry in payload:
+            player = entry.get("player", {})
+            stats_list = entry.get("statistics", [])
+            # Αθροίζουμε αν παίζει σε πολλαπλές διοργανώσεις μέσα στο ίδιο response
+            goals = sum((s.get("goals", {}).get("total") or 0) for s in stats_list)
+            minutes = sum((s.get("games", {}).get("minutes") or 0) for s in stats_list)
+            appearances = sum((s.get("games", {}).get("appearences") or 0) for s in stats_list)
+            result[player["id"]] = {
+                "name": player.get("name", ""),
+                "goals": goals,
+                "minutes": minutes,
+                "appearances": appearances,
+            }
+        # Το API-Football επιστρέφει pagination info ξεχωριστά -- εδώ απλοποιούμε:
+        # σταματάμε όταν η σελίδα φέρει λιγότερα από τα αναμενόμενα (τυπικά 20/σελίδα)
+        if len(payload) < 20:
+            break
+        page += 1
+        if page > 3:  # ασφάλεια -- μια ομάδα δεν έχει πάνω από ~60 καταχωρημένους παίκτες/σεζόν
+            break
+
+    _cache[cache_key] = (time.time(), result)
+    return result
+
+
 def get_fixture_events(fixture_id):
     """Χρονολόγιο γεγονότων ενός αγώνα (γκολ, κάρτες, κλπ) -- για έλεγχο 'Επόμενο Γκολ'."""
     return _get("fixtures/events", params={"fixture": fixture_id})

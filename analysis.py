@@ -33,6 +33,7 @@ class Prediction:
     edge: Optional[float] = None
     basis: str = ""       # σύντομη εξήγηση
     source: str = ""      # ποια στοιχηματική δίνει αυτή την απόδοση
+    player_id: Optional[int] = None   # μόνο για markets σκόρερ
 
 
 # ── Poisson βοηθητικά ────────────────────────────────────────────
@@ -323,6 +324,62 @@ def evaluate_stat_market_result(market_name, total_stat_value):
             except (IndexError, ValueError):
                 return None
             return total_stat_value > line
+    return None
+
+
+# ── Σκόρερ (Φάση 2β) ──────────────────────────────────────────────
+
+def compute_player_expected_goals(player_stats, team_avg_goals_per_match, team_lam_this_match):
+    """
+    Εκτιμά το αναμενόμενο γκολ ενός παίκτη ΓΙ' ΑΥΤΟΝ τον αγώνα, με βάση το
+    ιστορικό "μερίδιό" του πάνω στα γκολ της ομάδας.
+    """
+    if player_stats["minutes"] < config.SCORER_MIN_MINUTES or team_avg_goals_per_match <= 0:
+        return 0.0
+
+    player_goals_per_90 = player_stats["goals"] / (player_stats["minutes"] / 90)
+    team_goals_per_90 = team_avg_goals_per_match  # προσέγγιση: ~90λεπτος αγώνας
+
+    share = player_goals_per_90 / team_goals_per_90 if team_goals_per_90 > 0 else 0
+    share = max(0.0, min(share, 1.0))  # ασφάλεια -- ένας παίκτης δεν παίρνει >100% των γκολ
+
+    return team_lam_this_match * share
+
+
+def prob_anytime_scorer(player_lam):
+    return 1 - _poisson_pmf(0, player_lam)
+
+
+def prob_first_scorer(player_lam, total_match_lam):
+    if total_match_lam <= 0:
+        return 0.0
+    return player_lam / total_match_lam
+
+
+def evaluate_scorer_result(market_name, events, player_id):
+    """
+    market_name: "Anytime Goalscorer: <name>" ή "First Goalscorer: <name>"
+    events: το τελικό χρονολόγιο γεγονότων (api_football.get_fixture_events)
+    """
+    goal_events = [e for e in events if e.get("type") == "Goal"]
+    if not goal_events:
+        return False  # κανένα γκολ -> κανείς δεν σκόραρε
+
+    scorers = [e.get("player", {}).get("id") for e in goal_events]
+
+    if market_name.startswith("Anytime Goalscorer"):
+        return player_id in scorers
+
+    if market_name.startswith("First Goalscorer"):
+        goal_events_sorted = sorted(
+            goal_events,
+            key=lambda e: (
+                (e.get("time", {}).get("elapsed") or 0),
+                (e.get("time", {}).get("extra") or 0),
+            ),
+        )
+        return goal_events_sorted[0].get("player", {}).get("id") == player_id
+
     return None
 
 

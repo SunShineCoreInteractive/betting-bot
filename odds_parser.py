@@ -114,6 +114,43 @@ def parse_cards_odds(fixture_odds_response):
     return _parse_over_under_category(fixture_odds_response, "card", "Cards")
 
 
+ANYTIME_SCORER_BET_NAMES = {"anytime goalscorer", "goalscorer anytime", "to score anytime", "player to score"}
+FIRST_SCORER_BET_NAMES = {"first goalscorer", "first player to score"}
+
+
+def parse_scorer_odds_raw(fixture_odds_response, bet_names):
+    """
+    Επιστρέφει {player_name_label: {"odds": float, "source": str}} -- ΧΩΡΙΣ ταίριασμα
+    σε player_id ακόμα (αυτό γίνεται στο main.py με το scorer_matcher).
+    """
+    result = {}
+    if not fixture_odds_response:
+        return result
+
+    bookmakers = fixture_odds_response.get("bookmakers", [])
+    collected = {}
+    for bm in bookmakers:
+        bm_name = bm.get("name", "")
+        for bet in bm.get("bets", []):
+            bet_name_l = bet.get("name", "").lower()
+            if bet_name_l not in bet_names:
+                continue
+            for val in bet.get("values", []):
+                label = val.get("value")
+                try:
+                    odd = float(val.get("odd"))
+                except (TypeError, ValueError):
+                    continue
+                collected.setdefault(label, []).append((odd, bm_name))
+
+    for label, entries in collected.items():
+        picked = _pick_odds(entries)
+        if picked:
+            result[label] = picked
+
+    return result
+
+
 def parse_goals_and_btts_odds(fixture_odds_response):
     """
     Επιστρέφει dict market_name -> {"odds": float, "source": str}, έτοιμο

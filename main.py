@@ -19,6 +19,7 @@ import odds_parser
 import telegram_sender
 import sent_tracker
 import results_tracker
+import scorer_matcher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -118,6 +119,111 @@ def _get_predictions_for_fixture(fx):
         )
     except Exception:
         logger.exception("Σφάλμα κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
+
+    # Σκόρερ (μόνο pre-match -- χρειάζεται επίσημο line-up)
+    try:
+        predictions += _analyze_scorers(fx, lam_home, lam_away, odds_response)
+    except Exception:
+        logger.exception("Σφάλμα ανάλυσης σκόρερ fixture %s", fx["id"])
+
+    return predictions
+
+
+def _analyze_scorers(fx, lam_home, lam_away, odds_response):
+    """
+    Προϋποθέτει διαθέσιμο line-up (συνήθως ~1 ώρα πριν την έναρξη -- ταιριάζει
+    με το pre-match παράθυρό μας). Αν δεν υπάρχει ακόμα line-up, επιστρέφει [].
+    odds_response: το ήδη τραβηγμένο raw αποτέλεσμα από get_prematch_odds
+    (δεν ξανακαλούμε το API).
+    """
+    lineups = api_football.get_fixture_lineups(fx["id"])
+    if not lineups or len(lineups) < 2:
+        return []
+
+    home_lineup = next((l for l in lineups if l["team"]["id"] == fx["home_id"]), None)
+    away_lineup = next((l for l in lineups if l["team"]["id"] == fx["away_id"]), None)
+    if not home_lineup or not away_lineup:
+        return []
+
+    home_players_stats = api_football.get_team_players_season_stats(
+        fx["home_id"], fx["league_id"], fx["season"]
+    )
+    away_players_stats = api_football.get_team_players_season_stats(
+        fx["away_id"], fx["league_id"], fx["season"]
+    )
+
+    home_avg_goals = lam_home  # η ήδη υπολογισμένη αναμενόμενη τιμή χρησιμοποιείται σαν team_goals_per_90 proxy
+    away_avg_goals = lam_away
+    total_match_lam = lam_home + lam_away
+
+    anytime_odds_raw = odds_parser.parse_scorer_odds_raw(
+        odds_response[0] if odds_response else {}, odds_parser.ANYTIME_SCORER_BET_NAMES,
+    )
+    first_odds_raw = odds_parser.parse_scorer_odds_raw(
+        odds_response[0] if odds_response else {}, odds_parser.FIRST_SCORER_BET_NAMES,
+    )
+
+    predictions = []
+
+    for lineup, players_stats, team_lam in [
+        (home_lineup, home_players_stats, home_avg_goals),
+        (away_lineup, away_players_stats, away_avg_goals),
+    ]:
+        starters = lineup.get("startXI", [])
+        for entry in starters:
+            player = entry.get("player", {})
+            pid = player.get("id")
+            pname = player.get("name")
+            if not pid or pid not in players_stats:
+                continue
+
+            player_lam = analysis.compute_player_expected_goals(
+                players_stats[pid], team_lam, team_lam
+            )
+            if player_lam <= 0:
+                continue
+
+            # Anytime Goalscorer
+            if anytime_odds_raw:
+                roster_names = {pid: pname}
+                matched_label = None
+                for label in anytime_odds_raw:
+                    match_id, score = scorer_matcher.find_best_match(label, roster_names)
+                    if match_id == pid:
+                        matched_label = label
+                        break
+                if matched_label:
+                    odds_info = anytime_odds_raw[matched_label]
+                    p = analysis.prob_anytime_scorer(player_lam)
+                    ok, edge = analysis.is_value_bet(p, odds_info["odds"])
+                    if ok:
+                        predictions.append(analysis.Prediction(
+                            market=f"Anytime Goalscorer: {pname}", model_prob=p,
+                            odds=odds_info["odds"], implied_prob=analysis.implied_probability(odds_info["odds"]),
+                            edge=edge, basis=f"~{player_lam:.2f} αναμ. γκολ παίκτη αυτόν τον αγώνα",
+                            source=odds_info["source"], player_id=pid,
+                        ))
+
+            # First Goalscorer
+            if first_odds_raw:
+                roster_names = {pid: pname}
+                matched_label = None
+                for label in first_odds_raw:
+                    match_id, score = scorer_matcher.find_best_match(label, roster_names)
+                    if match_id == pid:
+                        matched_label = label
+                        break
+                if matched_label:
+                    odds_info = first_odds_raw[matched_label]
+                    p = analysis.prob_first_scorer(player_lam, total_match_lam)
+                    ok, edge = analysis.is_value_bet(p, odds_info["odds"])
+                    if ok:
+                        predictions.append(analysis.Prediction(
+                            market=f"First Goalscorer: {pname}", model_prob=p,
+                            odds=odds_info["odds"], implied_prob=analysis.implied_probability(odds_info["odds"]),
+                            edge=edge, basis=f"Μερίδιο επί συνολικών αναμ. γκολ αγώνα ({total_match_lam:.2f})",
+                            source=odds_info["source"], player_id=pid,
+                        ))
 
     return predictions
 
@@ -226,7 +332,7 @@ def run_prematch_check():
                 results_tracker.add_pending(
                     "singles",
                     f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best_single.market}",
-                    [{"fixture_id": fx["id"], "market": best_single.market}],
+                    [{"fixture_id": fx["id"], "market": best_single.market, "player_id": best_single.player_id}],
                 )
                 logger.info("Μονό στάλθηκε: %s %s vs %s", best_single.market, fx["home_name"], fx["away_name"])
 
@@ -264,7 +370,8 @@ def run_prematch_check():
                         + " + ".join(p.market for p in legs)
                     )
                     results_tracker.add_pending(
-                        "bet_builder", bb_desc, [{"fixture_id": fx["id"], "market": p.market} for p in legs]
+                        "bet_builder", bb_desc,
+                        [{"fixture_id": fx["id"], "market": p.market, "player_id": p.player_id} for p in legs]
                     )
                     logger.info("Bet Builder στάλθηκε: %s vs %s", fx["home_name"], fx["away_name"])
 
@@ -317,7 +424,8 @@ def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
             sent_tracker.mark_sent("parlay_legs_used", fx["id"], "used")
         parlay_desc = "\n".join(legs_desc)
         results_tracker.add_pending(
-            "parlay", parlay_desc, [{"fixture_id": fx["id"], "market": pred.market} for fx, _, pred in combo]
+            "parlay", parlay_desc,
+            [{"fixture_id": fx["id"], "market": pred.market, "player_id": pred.player_id} for fx, _, pred in combo]
         )
         logger.info("Παρολί στάλθηκε: %s επιλογές", len(combo))
 
@@ -433,6 +541,13 @@ def check_results():
                 won = analysis.evaluate_next_goal_result(
                     market, events, leg.get("elapsed_at_send"), leg.get("home_team_id")
                 )
+            elif market.startswith("Anytime Goalscorer") or market.startswith("First Goalscorer"):
+                try:
+                    events = api_football.get_fixture_events(fixture_id)
+                except Exception:
+                    logger.exception("Σφάλμα ανάκτησης events fixture %s", fixture_id)
+                    continue
+                won = analysis.evaluate_scorer_result(market, events, leg.get("player_id"))
             elif market.endswith("Corners") or market.endswith("Cards"):
                 try:
                     stats = api_football.get_fixture_statistics(fixture_id)
