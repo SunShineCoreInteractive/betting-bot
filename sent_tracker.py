@@ -22,9 +22,30 @@ def mark_sent(channel_key, fixture_id, market):
 
 
 def clear_expired_prematch(channel_key, still_valid_fixture_ids):
-    """Αφαιρεί από τη μνήμη ό,τι fixture_id δεν είναι πια στο τρέχον παράθυρο."""
+    """
+    Αφαιρεί από τη μνήμη ό,τι fixture_id δεν είναι πια στο τρέχον παράθυρο.
+    Για ΑΠΛΑ κλειδιά (fixture_id μονό αριθμό) -- singles / bet_builder.
+    """
     channel_memory = _sent.get(channel_key, {})
     to_delete = [key for key in channel_memory if key[0] not in still_valid_fixture_ids]
+    for key in to_delete:
+        del channel_memory[key]
+
+
+def clear_expired_parlay(channel_key, still_valid_fixture_ids):
+    """
+    Ειδική εκδοχή για το Παρολί -- εκεί το "fixture_id" στο κλειδί είναι στην
+    πραγματικότητα ένα tuple πολλαπλών fixture_id (ο συνδυασμός).
+    Διαγράφουμε την εγγραφή ΜΟΝΟ αν ΚΑΝΕΝΑ από τα fixtures του συνδυασμού
+    δεν είναι πια στο παράθυρο (δηλαδή όλοι οι αγώνες του combo έχουν
+    ήδη ξεκινήσει/περάσει).
+    """
+    channel_memory = _sent.get(channel_key, {})
+    to_delete = []
+    for key in channel_memory:
+        combo_fixture_ids = key[0]  # tuple
+        if not any(fid in still_valid_fixture_ids for fid in combo_fixture_ids):
+            to_delete.append(key)
     for key in to_delete:
         del channel_memory[key]
 

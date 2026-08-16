@@ -226,3 +226,88 @@ def analyze_fixture_goals_markets(lam_home, lam_away, odds_lookup, sample_size):
             ))
 
     return predictions
+
+
+# ── Live ανάλυση (Φάση 1) -- ΣΩΣΤΗ εκδοχή που κοιτάει σκορ + χρόνο ──────
+
+def analyze_fixture_goals_markets_live(
+    score_home, score_away, elapsed_minutes,
+    lam_home_full, lam_away_full, odds_lookup, sample_size,
+):
+    """
+    Σε αντίθεση με το analyze_fixture_goals_markets (pre-match), εδώ:
+      1. Παίρνουμε υπόψη τα γκολ που έχουν ΗΔΗ σκοραριστεί
+      2. Προσαρμόζουμε το αναμενόμενο γκολ στον χρόνο που ΑΠΟΜΕΝΕΙ, όχι σε
+         ολόκληρο το ματς
+      3. Αν το μοντέλο δίνει εξωπραγματικά ψηλό σύνολο (πιθανό σημάδι
+         αναξιόπιστων δεδομένων), δεν στέλνουμε καμία πρόβλεψη
+    """
+    if sample_size < config.MIN_SAMPLE_SIZE:
+        return []
+
+    total_full_match = lam_home_full + lam_away_full
+    if total_full_match > config.MAX_PLAUSIBLE_TOTAL_GOALS:
+        logger.warning(
+            "Live: μη ρεαλιστικό expected goals (%.2f) -- παραλείπεται", total_full_match
+        )
+        return []
+
+    elapsed = min(elapsed_minutes or 0, 90)
+    remaining_fraction = max(0.0, (90 - elapsed) / 90)
+
+    lam_home_remaining = lam_home_full * remaining_fraction
+    lam_away_remaining = lam_away_full * remaining_fraction
+
+    current_total = (score_home or 0) + (score_away or 0)
+
+    predictions = []
+
+    for line in [1.5, 2.5, 3.5]:
+        needed = line - current_total
+        if needed <= 0:
+            continue  # ήδη καλυμμένο -- δεν έχει νόημα ως "πρόβλεψη"
+        if remaining_fraction <= 0:
+            continue  # δεν απομένει χρόνος
+
+        p_over = prob_over(needed, lam_home_remaining, lam_away_remaining)
+        market_name = f"Over {line} Goals"
+        odds = odds_lookup.get(market_name)
+        if odds:
+            ok, edge = is_value_bet(p_over, odds)
+            if ok:
+                predictions.append(Prediction(
+                    market=market_name, model_prob=p_over, odds=odds,
+                    implied_prob=implied_probability(odds), edge=edge,
+                    basis=(
+                        f"Τρέχον σκορ {int(score_home or 0)}-{int(score_away or 0)}, "
+                        f"{elapsed}' -- χρειάζονται {needed:.1f} ακόμα γκολ, "
+                        f"εκτιμώμενα στον χρόνο που απομένει: "
+                        f"{lam_home_remaining + lam_away_remaining:.2f}"
+                    ),
+                ))
+
+    # BTTS -- λαμβάνει υπόψη αν κάποια ομάδα έχει ήδη σκοράρει
+    already_home = (score_home or 0) > 0
+    already_away = (score_away or 0) > 0
+    odds_btts = odds_lookup.get("BTTS Yes")
+    if odds_btts and not (already_home and already_away) and remaining_fraction > 0:
+        if already_home:
+            p_btts = 1 - _poisson_pmf(0, lam_away_remaining)
+            basis = f"{elapsed}': home ήδη σκόραρε, χρειάζεται away (xG remaining {lam_away_remaining:.2f})"
+        elif already_away:
+            p_btts = 1 - _poisson_pmf(0, lam_home_remaining)
+            basis = f"{elapsed}': away ήδη σκόραρε, χρειάζεται home (xG remaining {lam_home_remaining:.2f})"
+        else:
+            p_home_scores = 1 - _poisson_pmf(0, lam_home_remaining)
+            p_away_scores = 1 - _poisson_pmf(0, lam_away_remaining)
+            p_btts = p_home_scores * p_away_scores
+            basis = f"{elapsed}': κανείς δεν έχει σκοράρει ακόμα, εκτίμηση στον χρόνο που απομένει"
+
+        ok, edge = is_value_bet(p_btts, odds_btts)
+        if ok:
+            predictions.append(Prediction(
+                market="BTTS Yes", model_prob=p_btts, odds=odds_btts,
+                implied_prob=implied_probability(odds_btts), edge=edge, basis=basis,
+            ))
+
+    return predictions

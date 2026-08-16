@@ -63,9 +63,8 @@ def _kickoff_str(iso_date):
     return dt.strftime("%H:%M")
 
 
-def _get_predictions_for_fixture(fx, live=False):
-    """Τρέχει το μοντέλο goals/BTTS για ένα fixture. Επιστρέφει predictions.
-    live=True -> παίρνει LIVE αποδόσεις αντί για pre-match."""
+def _get_predictions_for_fixture(fx):
+    """Pre-match μοντέλο goals/BTTS. Επιστρέφει predictions."""
     home_recent = api_football.get_team_recent_fixtures(fx["home_id"])
     away_recent = api_football.get_team_recent_fixtures(fx["away_id"])
 
@@ -75,16 +74,36 @@ def _get_predictions_for_fixture(fx, live=False):
 
     lam_home, lam_away = analysis.compute_expected_goals(home_form, away_form)
 
-    if live:
-        odds_response = api_football.get_live_odds(fx["id"])
-    else:
-        odds_response = api_football.get_prematch_odds(fx["id"])
+    odds_response = api_football.get_prematch_odds(fx["id"])
     odds_lookup = odds_parser.parse_goals_and_btts_odds(
         odds_response[0] if odds_response else {}
     )
 
     predictions = analysis.analyze_fixture_goals_markets(
         lam_home, lam_away, odds_lookup, sample_size
+    )
+    return predictions
+
+
+def _get_live_predictions_for_fixture(fx, score_home, score_away, elapsed_minutes):
+    """Live μοντέλο -- λαμβάνει υπόψη τρέχον σκορ + χρόνο που απομένει."""
+    home_recent = api_football.get_team_recent_fixtures(fx["home_id"])
+    away_recent = api_football.get_team_recent_fixtures(fx["away_id"])
+
+    home_form = analysis.team_form_from_fixtures(home_recent, fx["home_id"])
+    away_form = analysis.team_form_from_fixtures(away_recent, fx["away_id"])
+    sample_size = min(home_form["sample_size"], away_form["sample_size"])
+
+    lam_home_full, lam_away_full = analysis.compute_expected_goals(home_form, away_form)
+
+    odds_response = api_football.get_live_odds(fx["id"])
+    odds_lookup = odds_parser.parse_goals_and_btts_odds(
+        odds_response[0] if odds_response else {}
+    )
+
+    predictions = analysis.analyze_fixture_goals_markets_live(
+        score_home, score_away, elapsed_minutes,
+        lam_home_full, lam_away_full, odds_lookup, sample_size,
     )
     return predictions
 
@@ -98,8 +117,9 @@ def run_prematch_check():
     logger.info("Pre-match παράθυρο: %s αγώνες", len(fixtures))
 
     fixture_ids_in_window = {f["fixture"]["id"] for f in fixtures}
-    for ch in ("singles", "bet_builder", "parlay"):
+    for ch in ("singles", "bet_builder"):
         sent_tracker.clear_expired_prematch(ch, fixture_ids_in_window)
+    sent_tracker.clear_expired_parlay("parlay", fixture_ids_in_window)
 
     parlay_pool = []  # [(fx, Prediction), ...] υποψήφιοι από διαφορετικούς αγώνες
 
@@ -116,17 +136,17 @@ def run_prematch_check():
         if not predictions:
             continue
 
-        # ── Μονά ──
-        for pred in predictions:
-            if sent_tracker.already_sent("singles", fx["id"], pred.market):
-                continue
+        # ── Μονά (1 μόνο μήνυμα/αγώνα -- η γραμμή με το μεγαλύτερο edge) ──
+        best_single = max(predictions, key=lambda p: p.edge or 0)
+        if not sent_tracker.already_sent("singles", fx["id"], "any"):
             text = telegram_sender.format_single(
                 fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
-                pred.market, pred.model_prob, pred.odds, pred.edge, pred.basis,
+                best_single.market, best_single.model_prob, best_single.odds,
+                best_single.edge, best_single.basis,
             )
             if telegram_sender.send_message("singles", text):
-                sent_tracker.mark_sent("singles", fx["id"], pred.market)
-                logger.info("Μονό στάλθηκε: %s %s vs %s", pred.market, fx["home_name"], fx["away_name"])
+                sent_tracker.mark_sent("singles", fx["id"], "any")
+                logger.info("Μονό στάλθηκε: %s %s vs %s", best_single.market, fx["home_name"], fx["away_name"])
 
         # συλλογή για Παρολί (pool, ξεχωριστά ανά αγώνα)
         for pred in predictions:
@@ -164,7 +184,7 @@ def run_prematch_check():
 
 
 def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
-    sent_tracker.clear_expired_prematch("parlay", fixture_ids_in_window)
+    sent_tracker.clear_expired_parlay("parlay", fixture_ids_in_window)
 
     # ένα leg ανά αγώνα -- κρατάμε το καλύτερο (μεγαλύτερο edge) ανά fixture
     best_per_fixture = {}
@@ -211,27 +231,32 @@ def run_live_check():
         fx = _fixture_basics(raw_fx)
         live_ids.add(fx["id"])
 
-        try:
-            predictions = _get_predictions_for_fixture(fx, live=True)
-        except Exception:
-            logger.exception("Σφάλμα live ανάλυσης fixture %s", fx["id"])
-            continue
-
         minute = raw_fx["fixture"]["status"]["elapsed"]
         score_home = raw_fx["goals"]["home"]
         score_away = raw_fx["goals"]["away"]
 
-        for pred in predictions:
-            if sent_tracker.already_sent("live", fx["id"], pred.market):
-                continue
-            text = telegram_sender.format_live(
-                fx["league_name"], minute, fx["home_name"], fx["away_name"],
-                score_home, score_away, pred.market, pred.model_prob,
-                pred.odds, pred.edge, pred.basis,
-            )
-            if telegram_sender.send_message("live", text):
-                sent_tracker.mark_sent("live", fx["id"], pred.market)
-                logger.info("Live στάλθηκε: %s %s vs %s", pred.market, fx["home_name"], fx["away_name"])
+        try:
+            predictions = _get_live_predictions_for_fixture(fx, score_home, score_away, minute)
+        except Exception:
+            logger.exception("Σφάλμα live ανάλυσης fixture %s", fx["id"])
+            continue
+
+        if not predictions:
+            continue
+
+        # 1 μόνο μήνυμα ανά αγώνα -- η γραμμή με το μεγαλύτερο edge
+        best = max(predictions, key=lambda p: p.edge or 0)
+
+        if sent_tracker.already_sent("live", fx["id"], "any"):
+            continue
+        text = telegram_sender.format_live(
+            fx["league_name"], minute, fx["home_name"], fx["away_name"],
+            score_home, score_away, best.market, best.model_prob,
+            best.odds, best.edge, best.basis,
+        )
+        if telegram_sender.send_message("live", text):
+            sent_tracker.mark_sent("live", fx["id"], "any")
+            logger.info("Live στάλθηκε: %s %s vs %s", best.market, fx["home_name"], fx["away_name"])
 
     sent_tracker.clear_finished_live("live", live_ids)
 
