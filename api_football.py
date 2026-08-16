@@ -50,6 +50,12 @@ def get_daily_call_count():
     return _daily_call_count
 
 
+def budget_is_low():
+    """True όταν πλησιάζουμε το ημερήσιο πλαφόν -- σήμα να κόψουμε non-core markets."""
+    remaining = config.DAILY_CALL_BUDGET - _daily_call_count
+    return remaining < config.DAILY_BUDGET_SAFETY_MARGIN
+
+
 def _throttle():
     """Περιμένει όσο χρειάζεται ώστε να μην ξεπεράσουμε το ανά-λεπτό όριο του API."""
     global _last_call_time

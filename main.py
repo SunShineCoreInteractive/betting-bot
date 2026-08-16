@@ -101,30 +101,34 @@ def _get_predictions_for_fixture(fx):
         lam_home, lam_away, odds_lookup, sample_size
     )
 
-    # Κόρνερ / Κάρτες
-    try:
-        home_cc = api_football.get_team_corner_card_form(fx["home_id"], home_recent)
-        away_cc = api_football.get_team_corner_card_form(fx["away_id"], away_recent)
-        lam_corners_home, lam_corners_away = analysis.compute_expected_corners(
-            home_cc["corners"], away_cc["corners"]
-        )
-        lam_cards_home, lam_cards_away = analysis.compute_expected_cards(
-            home_cc["cards"], away_cc["cards"]
-        )
-        corners_sample = min(home_cc["corners"]["sample_size"], away_cc["corners"]["sample_size"])
-        cards_sample = min(home_cc["cards"]["sample_size"], away_cc["cards"]["sample_size"])
-        predictions += analysis.analyze_corners_cards_markets(
-            lam_corners_home, lam_corners_away, lam_cards_home, lam_cards_away,
-            odds_lookup, corners_sample, cards_sample,
-        )
-    except Exception:
-        logger.exception("Σφάλμα κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
+    # Κόρνερ / Κάρτες -- παραλείπονται αν πλησιάζουμε το ημερήσιο πλαφόν
+    if not api_football.budget_is_low():
+        try:
+            home_cc = api_football.get_team_corner_card_form(fx["home_id"], home_recent)
+            away_cc = api_football.get_team_corner_card_form(fx["away_id"], away_recent)
+            lam_corners_home, lam_corners_away = analysis.compute_expected_corners(
+                home_cc["corners"], away_cc["corners"]
+            )
+            lam_cards_home, lam_cards_away = analysis.compute_expected_cards(
+                home_cc["cards"], away_cc["cards"]
+            )
+            corners_sample = min(home_cc["corners"]["sample_size"], away_cc["corners"]["sample_size"])
+            cards_sample = min(home_cc["cards"]["sample_size"], away_cc["cards"]["sample_size"])
+            predictions += analysis.analyze_corners_cards_markets(
+                lam_corners_home, lam_corners_away, lam_cards_home, lam_cards_away,
+                odds_lookup, corners_sample, cards_sample,
+            )
+        except Exception:
+            logger.exception("Σφάλμα κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
+    else:
+        logger.warning("Χαμηλό ημερήσιο budget -- παραλείπονται κόρνερ/κάρτες για fixture %s", fx["id"])
 
-    # Σκόρερ (μόνο pre-match -- χρειάζεται επίσημο line-up)
-    try:
-        predictions += _analyze_scorers(fx, lam_home, lam_away, odds_response)
-    except Exception:
-        logger.exception("Σφάλμα ανάλυσης σκόρερ fixture %s", fx["id"])
+    # Σκόρερ (μόνο pre-match -- χρειάζεται επίσημο line-up, επίσης παραλείπεται σε χαμηλό budget)
+    if not api_football.budget_is_low():
+        try:
+            predictions += _analyze_scorers(fx, lam_home, lam_away, odds_response)
+        except Exception:
+            logger.exception("Σφάλμα ανάλυσης σκόρερ fixture %s", fx["id"])
 
     return predictions
 
@@ -247,46 +251,49 @@ def _get_live_predictions_for_fixture(fx, score_home, score_away, elapsed_minute
         lam_home_full, lam_away_full, odds_lookup, sample_size,
     )
 
-    # Κόρνερ / Κάρτες (live)
-    try:
-        home_cc = api_football.get_team_corner_card_form(fx["home_id"], home_recent)
-        away_cc = api_football.get_team_corner_card_form(fx["away_id"], away_recent)
-        lam_corners_home_full, lam_corners_away_full = analysis.compute_expected_corners(
-            home_cc["corners"], away_cc["corners"]
-        )
-        lam_cards_home_full, lam_cards_away_full = analysis.compute_expected_cards(
-            home_cc["cards"], away_cc["cards"]
-        )
-        corners_sample = min(home_cc["corners"]["sample_size"], away_cc["corners"]["sample_size"])
-        cards_sample = min(home_cc["cards"]["sample_size"], away_cc["cards"]["sample_size"])
+    # Κόρνερ / Κάρτες (live) -- παραλείπονται αν πλησιάζουμε το ημερήσιο πλαφόν
+    if not api_football.budget_is_low():
+        try:
+            home_cc = api_football.get_team_corner_card_form(fx["home_id"], home_recent)
+            away_cc = api_football.get_team_corner_card_form(fx["away_id"], away_recent)
+            lam_corners_home_full, lam_corners_away_full = analysis.compute_expected_corners(
+                home_cc["corners"], away_cc["corners"]
+            )
+            lam_cards_home_full, lam_cards_away_full = analysis.compute_expected_cards(
+                home_cc["cards"], away_cc["cards"]
+            )
+            corners_sample = min(home_cc["corners"]["sample_size"], away_cc["corners"]["sample_size"])
+            cards_sample = min(home_cc["cards"]["sample_size"], away_cc["cards"]["sample_size"])
 
-        live_stats = api_football.get_fixture_statistics(fx["id"], live=True)
-        current_corners_home = current_corners_away = 0
-        current_cards_home = current_cards_away = 0
-        if live_stats and len(live_stats) >= 2:
-            home_stat = next((s for s in live_stats if s["team"]["id"] == fx["home_id"]), None)
-            away_stat = next((s for s in live_stats if s["team"]["id"] == fx["away_id"]), None)
-            if home_stat:
-                current_corners_home = api_football._extract_stat_value(home_stat, "Corner Kicks") or 0
-                current_cards_home = (
-                    (api_football._extract_stat_value(home_stat, "Yellow Cards") or 0)
-                    + (api_football._extract_stat_value(home_stat, "Red Cards") or 0)
-                )
-            if away_stat:
-                current_corners_away = api_football._extract_stat_value(away_stat, "Corner Kicks") or 0
-                current_cards_away = (
-                    (api_football._extract_stat_value(away_stat, "Yellow Cards") or 0)
-                    + (api_football._extract_stat_value(away_stat, "Red Cards") or 0)
-                )
+            live_stats = api_football.get_fixture_statistics(fx["id"], live=True)
+            current_corners_home = current_corners_away = 0
+            current_cards_home = current_cards_away = 0
+            if live_stats and len(live_stats) >= 2:
+                home_stat = next((s for s in live_stats if s["team"]["id"] == fx["home_id"]), None)
+                away_stat = next((s for s in live_stats if s["team"]["id"] == fx["away_id"]), None)
+                if home_stat:
+                    current_corners_home = api_football._extract_stat_value(home_stat, "Corner Kicks") or 0
+                    current_cards_home = (
+                        (api_football._extract_stat_value(home_stat, "Yellow Cards") or 0)
+                        + (api_football._extract_stat_value(home_stat, "Red Cards") or 0)
+                    )
+                if away_stat:
+                    current_corners_away = api_football._extract_stat_value(away_stat, "Corner Kicks") or 0
+                    current_cards_away = (
+                        (api_football._extract_stat_value(away_stat, "Yellow Cards") or 0)
+                        + (api_football._extract_stat_value(away_stat, "Red Cards") or 0)
+                    )
 
-        predictions += analysis.analyze_corners_cards_markets_live(
-            current_corners_home, current_corners_away, current_cards_home, current_cards_away,
-            elapsed_minutes, lam_corners_home_full, lam_corners_away_full,
-            lam_cards_home_full, lam_cards_away_full,
-            odds_lookup, corners_sample, cards_sample,
-        )
-    except Exception:
-        logger.exception("Σφάλμα live κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
+            predictions += analysis.analyze_corners_cards_markets_live(
+                current_corners_home, current_corners_away, current_cards_home, current_cards_away,
+                elapsed_minutes, lam_corners_home_full, lam_corners_away_full,
+                lam_cards_home_full, lam_cards_away_full,
+                odds_lookup, corners_sample, cards_sample,
+            )
+        except Exception:
+            logger.exception("Σφάλμα live κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
+    else:
+        logger.warning("Χαμηλό ημερήσιο budget -- παραλείπονται live κόρνερ/κάρτες για fixture %s", fx["id"])
 
     return predictions
 
