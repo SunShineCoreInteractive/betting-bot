@@ -216,10 +216,15 @@ def run_prematch_check():
 
 def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
     sent_tracker.clear_expired_parlay("parlay", fixture_ids_in_window)
+    sent_tracker.clear_expired_prematch("parlay_legs_used", fixture_ids_in_window)
 
-    # ένα leg ανά αγώνα -- κρατάμε το καλύτερο (μεγαλύτερο edge) ανά fixture
+    # ένα leg ανά αγώνα -- κρατάμε το καλύτερο (μεγαλύτερο edge) ανά fixture,
+    # ΕΞΑΙΡΩΝΤΑΣ αγώνες που έχουν ήδη χρησιμοποιηθεί σε προηγούμενο Παρολί
+    # (ώστε το ίδιο ματς να μην ξαναμπαίνει σε νέο συνδυασμό κάθε 5 λεπτά)
     best_per_fixture = {}
     for fx, kickoff_str, pred in parlay_pool:
+        if sent_tracker.already_sent("parlay_legs_used", fx["id"], "used"):
+            continue
         current = best_per_fixture.get(fx["id"])
         if current is None or (pred.edge or 0) > (current[2].edge or 0):
             best_per_fixture[fx["id"]] = (fx, kickoff_str, pred)
@@ -237,6 +242,10 @@ def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
 
     legs = [pred for _, _, pred in combo]
     combined_prob, combined_odds = analysis.combine_parlay(legs)
+
+    if combined_prob < config.PARLAY_MIN_COMBINED_PROB:
+        return  # δεν φτάνει το ελάχιστο 50% -- δεν στέλνουμε
+
     combined_edge = combined_prob - (1 / combined_odds if combined_odds else 1)
 
     legs_desc = [
@@ -246,6 +255,8 @@ def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
     text = telegram_sender.format_parlay(legs_desc, combined_odds, combined_prob, combined_edge)
     if telegram_sender.send_message("parlay", text):
         sent_tracker.mark_sent("parlay", combo_key, "parlay")
+        for fx, _, _ in combo:
+            sent_tracker.mark_sent("parlay_legs_used", fx["id"], "used")
         parlay_desc = "\n".join(legs_desc)
         results_tracker.add_pending(
             "parlay", parlay_desc, [(fx["id"], pred.market) for fx, _, pred in combo]

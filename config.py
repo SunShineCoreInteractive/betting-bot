@@ -43,6 +43,7 @@ BET_BUILDER_MIN_COMBINED_PROB = 0.40     # ελάχιστο τελικό συν�
 
 PARLAY_MIN_LEGS = 2
 PARLAY_MAX_LEGS = 3
+PARLAY_MIN_COMBINED_PROB = 0.50   # ελάχιστη συνολική εκτίμηση για να σταλεί το Παρολί
 
 # Πόσους πρόσφατους αγώνες τραβάμε ανά ομάδα για τη στατιστική βάση
 RECENT_FIXTURES_LOOKBACK = 10
