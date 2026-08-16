@@ -30,8 +30,9 @@ _daily_count_date = None
 # ταυτόχρονα), οι κλήσεις πέφτουν όλες μαζί μέσα σε 1-2 δευτερόλεπτα και
 # σκάει το ανά-λεπτό όριο. Εδώ επιβάλλουμε ελάχιστο διάστημα ανάμεσα σε
 # διαδοχικές κλήσεις, ώστε να "απλώνονται" ομαλά.
-MIN_SECONDS_BETWEEN_CALLS = 0.35   # ~170 κλήσεις/λεπτό μέγιστο -- συντηρητικό όριο ασφαλείας
+MIN_SECONDS_BETWEEN_CALLS = 0.6   # ~100 κλήσεις/λεπτό μέγιστο -- πιο συντηρητικό (το πλάνο Pro επιτρέπει 300/λεπτό, αλλά ο περιορισμός μετράει και ανά IP, οπότε κρατάμε απόσταση ασφαλείας)
 _last_call_time = 0.0
+MAX_RETRIES_ON_RATE_LIMIT = 3
 
 
 def _track_call():
@@ -59,7 +60,7 @@ def _throttle():
     _last_call_time = time.time()
 
 
-def _get(endpoint, params=None, cache_key=None, cache_hours=0):
+def _get(endpoint, params=None, cache_key=None, cache_hours=0, _retry_count=0):
     """Βασική GET κλήση με προαιρετικό caching."""
     if cache_key and cache_key in _cache:
         ts, data = _cache[cache_key]
@@ -69,18 +70,29 @@ def _get(endpoint, params=None, cache_key=None, cache_hours=0):
     _throttle()
     url = f"{config.API_FOOTBALL_BASE_URL}/{endpoint}"
     resp = _session.get(url, params=params or {}, timeout=20)
+
+    if resp.status_code == 429:
+        if _retry_count >= MAX_RETRIES_ON_RATE_LIMIT:
+            logger.error("Rate limit (HTTP 429) -- εξαντλήθηκαν οι προσπάθειες για %s", endpoint)
+            resp.raise_for_status()
+        wait = 3 * (_retry_count + 1)  # 3s, 6s, 9s
+        logger.warning("HTTP 429 (rate limit) στο %s -- αναμονή %ss και retry...", endpoint, wait)
+        time.sleep(wait)
+        return _get(endpoint, params=params, cache_key=cache_key, cache_hours=cache_hours,
+                     _retry_count=_retry_count + 1)
+
     _track_call()
     resp.raise_for_status()
     payload = resp.json()
 
     if payload.get("errors"):
         logger.warning("API-Football errors στο %s: %s", endpoint, payload["errors"])
-        if "rateLimit" in payload["errors"]:
-            # Σκάσαμε το ανά-λεπτό όριο παρά το throttle -- περίμενε λίγο παραπάνω
-            # και ξαναδοκίμασε ΜΙΑ φορά, ώστε ο τρέχων κύκλος να μην χάσει δεδομένα.
-            logger.warning("Rate limit -- αναμονή 5s και retry...")
-            time.sleep(5)
-            return _get(endpoint, params=params, cache_key=cache_key, cache_hours=cache_hours)
+        if "rateLimit" in payload["errors"] and _retry_count < MAX_RETRIES_ON_RATE_LIMIT:
+            # "Μαλακή" μορφή σφάλματος rate-limit (HTTP 200 αλλά errors.rateLimit)
+            logger.warning("Rate limit (soft) -- αναμονή 3s και retry...")
+            time.sleep(3)
+            return _get(endpoint, params=params, cache_key=cache_key, cache_hours=cache_hours,
+                         _retry_count=_retry_count + 1)
 
     data = payload.get("response", [])
 
@@ -168,6 +180,18 @@ def get_live_odds(fixture_id=None):
 def get_fixture_by_id(fixture_id):
     """Τρέχουσα κατάσταση ενός συγκεκριμένου fixture (για έλεγχο αποτελέσματος)."""
     return _get("fixtures", params={"id": fixture_id})
+
+
+def get_fixtures_by_ids(fixture_ids):
+    """
+    Τρέχουσα κατάσταση ΠΟΛΛΩΝ fixtures σε 1 κλήση (έως 20 -- όριο του API).
+    Επιστρέφει dict {fixture_id: raw_fixture_data}.
+    """
+    if not fixture_ids:
+        return {}
+    ids_param = "-".join(str(fid) for fid in fixture_ids[:20])
+    results = _get("fixtures", params={"ids": ids_param})
+    return {r["fixture"]["id"]: r for r in results}
 
 
 def get_fixture_events(fixture_id):

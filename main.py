@@ -320,21 +320,36 @@ def run_live_check():
 # ── Έλεγχος αποτελεσμάτων (ΚΕΡΔΙΣΕ/ΕΧΑΣΕ follow-up) ─────────────
 
 def check_results():
-    for entry in results_tracker.get_pending():
+    pending = results_tracker.get_pending()
+
+    # Μαζεύουμε ΟΛΑ τα fixture_id που χρειάζονται έλεγχο (χωρίς διπλότυπα),
+    # και τα ελέγχουμε σε ομάδες των 20 -- αντί για 1 κλήση/leg.
+    needed_ids = set()
+    for entry in pending:
+        for i, leg in enumerate(entry["legs"]):
+            if entry["results"].get(i) is None:
+                needed_ids.add(leg["fixture_id"])
+
+    fixtures_by_id = {}
+    needed_ids_list = list(needed_ids)
+    for chunk_start in range(0, len(needed_ids_list), 20):
+        chunk = needed_ids_list[chunk_start:chunk_start + 20]
+        try:
+            fixtures_by_id.update(api_football.get_fixtures_by_ids(chunk))
+        except Exception:
+            logger.exception("Σφάλμα batch ελέγχου αποτελεσμάτων για %s fixtures", len(chunk))
+
+    for entry in pending:
         for i, leg in enumerate(entry["legs"]):
             if entry["results"].get(i) is not None:
                 continue  # ήδη γνωστό αποτέλεσμα για αυτό το leg
 
             fixture_id = leg["fixture_id"]
             market = leg["market"]
-            try:
-                raw = api_football.get_fixture_by_id(fixture_id)
-            except Exception:
-                logger.exception("Σφάλμα ελέγχου αποτελέσματος fixture %s", fixture_id)
+            raw_fx = fixtures_by_id.get(fixture_id)
+            if not raw_fx:
                 continue
-            if not raw:
-                continue
-            status = raw[0]["fixture"]["status"]["short"]
+            status = raw_fx["fixture"]["status"]["short"]
             if status not in ("FT", "AET", "PEN"):
                 continue  # δεν έχει τελειώσει ακόμα
 
@@ -348,8 +363,8 @@ def check_results():
                     market, events, leg.get("elapsed_at_send"), leg.get("home_team_id")
                 )
             else:
-                score_home = raw[0]["goals"]["home"]
-                score_away = raw[0]["goals"]["away"]
+                score_home = raw_fx["goals"]["home"]
+                score_away = raw_fx["goals"]["away"]
                 won = analysis.evaluate_market_result(market, score_home, score_away)
 
             entry["results"][i] = won
