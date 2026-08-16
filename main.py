@@ -271,11 +271,15 @@ def run_live_check():
     logger.info("Live fixtures: %s", len(live_fixtures))
 
     live_ids = set()
+    stats = {"checked": 0, "wrong_league": 0, "no_predictions": 0, "sent": 0, "already_sent": 0}
+
     for raw_fx in live_fixtures:
         if raw_fx["league"]["id"] not in ALLOWED_LEAGUE_IDS:
+            stats["wrong_league"] += 1
             continue
         fx = _fixture_basics(raw_fx)
         live_ids.add(fx["id"])
+        stats["checked"] += 1
 
         minute = raw_fx["fixture"]["status"]["elapsed"]
         score_home = raw_fx["goals"]["home"]
@@ -288,12 +292,14 @@ def run_live_check():
             continue
 
         if not predictions:
+            stats["no_predictions"] += 1
             continue
 
         # 1 μόνο μήνυμα ανά αγώνα -- η γραμμή με το μεγαλύτερο edge
         best = max(predictions, key=lambda p: p.edge or 0)
 
         if sent_tracker.already_sent("live", fx["id"], "any"):
+            stats["already_sent"] += 1
             continue
         text = telegram_sender.format_live(
             fx["league_name"], minute, fx["home_name"], fx["away_name"],
@@ -302,6 +308,7 @@ def run_live_check():
         )
         if telegram_sender.send_message("live", text):
             sent_tracker.mark_sent("live", fx["id"], "any")
+            stats["sent"] += 1
             results_tracker.add_pending(
                 "live",
                 f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best.market} (LIVE)",
@@ -313,6 +320,12 @@ def run_live_check():
                 }],
             )
             logger.info("Live στάλθηκε: %s %s vs %s", best.market, fx["home_name"], fx["away_name"])
+
+    logger.info(
+        "Live σύνοψη: %s εγκεκριμένης λίγκας, %s χωρίς πρόβλεψη (καμία ευκαιρία/odds/δείγμα), "
+        "%s ήδη σταλμένα, %s νέα μηνύματα (%s εκτός λίγκας)",
+        stats["checked"], stats["no_predictions"], stats["already_sent"], stats["sent"], stats["wrong_league"],
+    )
 
     sent_tracker.clear_finished_live("live", live_ids)
 
