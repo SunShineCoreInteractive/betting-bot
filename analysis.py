@@ -309,6 +309,134 @@ def evaluate_market_result(market_name, score_home, score_away):
     return None
 
 
+def evaluate_stat_market_result(market_name, total_stat_value):
+    """
+    Για markets τύπου 'Over 9.5 Corners' / 'Over 3.5 Cards' -- total_stat_value
+    είναι το τελικό άθροισμα (και των δύο ομάδων) κόρνερ ή καρτών.
+    """
+    if total_stat_value is None:
+        return None
+    for suffix in ("Corners", "Cards"):
+        if market_name.endswith(suffix) and market_name.startswith("Over"):
+            try:
+                line = float(market_name.split()[1])
+            except (IndexError, ValueError):
+                return None
+            return total_stat_value > line
+    return None
+
+
+# ── Κόρνερ / Κάρτες (Φάση 2) ──────────────────────────────────────
+
+def compute_expected_corners(home_corner_form, away_corner_form):
+    """Ίδια λογική επίθεσης/άμυνας με τα γκολ -- ίδια πεδία (avg_scored/avg_conceded)."""
+    return compute_expected_goals(home_corner_form, away_corner_form, league_avg_goals=config.LEAGUE_AVG_CORNERS)
+
+
+def compute_expected_cards(home_cards_form, away_cards_form):
+    """Οι κάρτες ΔΕΝ έχουν 'άμυνα' -- είναι απλά η δική της τάση κάθε ομάδας."""
+    return home_cards_form["avg"], away_cards_form["avg"]
+
+
+def analyze_corners_cards_markets(lam_corners_home, lam_corners_away,
+                                   lam_cards_home, lam_cards_away,
+                                   odds_lookup, corners_sample, cards_sample):
+    predictions = []
+
+    if corners_sample >= config.MIN_SAMPLE_SIZE_CORNERS_CARDS:
+        for line in config.CORNER_LINES:
+            p_over = prob_over(line, lam_corners_home, lam_corners_away)
+            market_name = f"Over {line} Corners"
+            odds_info = odds_lookup.get(market_name)
+            if odds_info:
+                odds = odds_info["odds"]
+                ok, edge = is_value_bet(p_over, odds)
+                if ok:
+                    predictions.append(Prediction(
+                        market=market_name, model_prob=p_over, odds=odds,
+                        implied_prob=implied_probability(odds), edge=edge,
+                        basis=f"Εκτιμώμενα κόρνερ αγώνα: {lam_corners_home + lam_corners_away:.1f}",
+                        source=odds_info["source"],
+                    ))
+
+    if cards_sample >= config.MIN_SAMPLE_SIZE_CORNERS_CARDS:
+        for line in config.CARD_LINES:
+            p_over = prob_over(line, lam_cards_home, lam_cards_away)
+            market_name = f"Over {line} Cards"
+            odds_info = odds_lookup.get(market_name)
+            if odds_info:
+                odds = odds_info["odds"]
+                ok, edge = is_value_bet(p_over, odds)
+                if ok:
+                    predictions.append(Prediction(
+                        market=market_name, model_prob=p_over, odds=odds,
+                        implied_prob=implied_probability(odds), edge=edge,
+                        basis=f"Εκτιμώμενες κάρτες αγώνα: {lam_cards_home + lam_cards_away:.1f}",
+                        source=odds_info["source"],
+                    ))
+
+    return predictions
+
+
+def analyze_corners_cards_markets_live(
+    current_corners_home, current_corners_away, current_cards_home, current_cards_away,
+    elapsed_minutes, lam_corners_home_full, lam_corners_away_full,
+    lam_cards_home_full, lam_cards_away_full,
+    odds_lookup, corners_sample, cards_sample,
+):
+    predictions = []
+    elapsed = min(elapsed_minutes or 0, 90)
+    remaining_fraction = max(0.0, (90 - elapsed) / 90)
+    if remaining_fraction <= 0:
+        return predictions
+
+    if corners_sample >= config.MIN_SAMPLE_SIZE_CORNERS_CARDS:
+        lam_home_rem = lam_corners_home_full * remaining_fraction
+        lam_away_rem = lam_corners_away_full * remaining_fraction
+        current_total = (current_corners_home or 0) + (current_corners_away or 0)
+        for line in config.CORNER_LINES:
+            needed = line - current_total
+            if needed <= 0:
+                continue
+            p_over = prob_over(needed, lam_home_rem, lam_away_rem)
+            market_name = f"Over {line} Corners"
+            odds_info = odds_lookup.get(market_name)
+            if odds_info:
+                odds = odds_info["odds"]
+                ok, edge = is_value_bet(p_over, odds)
+                if ok:
+                    predictions.append(Prediction(
+                        market=market_name, model_prob=p_over, odds=odds,
+                        implied_prob=implied_probability(odds), edge=edge,
+                        basis=f"{elapsed}': {int(current_total)} κόρνερ μέχρι τώρα, χρειάζονται {needed:.1f} ακόμα",
+                        source=odds_info["source"],
+                    ))
+
+    if cards_sample >= config.MIN_SAMPLE_SIZE_CORNERS_CARDS:
+        lam_home_rem = lam_cards_home_full * remaining_fraction
+        lam_away_rem = lam_cards_away_full * remaining_fraction
+        current_total = (current_cards_home or 0) + (current_cards_away or 0)
+        for line in config.CARD_LINES:
+            needed = line - current_total
+            if needed <= 0:
+                continue
+            p_over = prob_over(needed, lam_home_rem, lam_away_rem)
+            market_name = f"Over {line} Cards"
+            odds_info = odds_lookup.get(market_name)
+            if odds_info:
+                odds = odds_info["odds"]
+                ok, edge = is_value_bet(p_over, odds)
+                if ok:
+                    predictions.append(Prediction(
+                        market=market_name, model_prob=p_over, odds=odds,
+                        implied_prob=implied_probability(odds), edge=edge,
+                        basis=f"{elapsed}': {int(current_total)} κάρτες μέχρι τώρα, χρειάζονται {needed:.1f} ακόμα",
+                        source=odds_info["source"],
+                    ))
+
+    return predictions
+
+
 # ── Επόμενο Γκολ (live) ──────────────────────────────────────────
 
 def prob_next_goal(lam_home_remaining, lam_away_remaining):

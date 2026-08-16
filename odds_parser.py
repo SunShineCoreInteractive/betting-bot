@@ -70,6 +70,50 @@ def _pick_odds(entries):
     return {"odds": avg_odd, "source": f"Μέσος όρος αγοράς ({len(entries)} bookmakers)"}
 
 
+def _parse_over_under_category(fixture_odds_response, name_keyword, category_label):
+    """
+    Γενική συνάρτηση για markets τύπου 'Over/Under X <κατηγορία>' (κόρνερ, κάρτες κλπ).
+    name_keyword: λέξη-κλειδί που πρέπει να περιέχει το όνομα του bet type (π.χ. "corner").
+    category_label: πώς θα ονομαστεί στο τελικό dict (π.χ. "Corners").
+    """
+    result = {}
+    if not fixture_odds_response:
+        return result
+
+    bookmakers = fixture_odds_response.get("bookmakers", [])
+    collected = {}
+    for bm in bookmakers:
+        bm_name = bm.get("name", "")
+        for bet in bm.get("bets", []):
+            bet_name_l = bet.get("name", "").lower()
+            if name_keyword not in bet_name_l:
+                continue
+            for val in bet.get("values", []):
+                label = (val.get("value") or "")
+                if not (label.lower().startswith("over") or label.lower().startswith("under")):
+                    continue  # ασφάλεια -- αγνόησε π.χ. team-based κάρτες markets
+                try:
+                    odd = float(val.get("odd"))
+                except (TypeError, ValueError):
+                    continue
+                collected.setdefault(label, []).append((odd, bm_name))
+
+    for label, entries in collected.items():
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"{label} {category_label}"] = picked
+
+    return result
+
+
+def parse_corners_odds(fixture_odds_response):
+    return _parse_over_under_category(fixture_odds_response, "corner", "Corners")
+
+
+def parse_cards_odds(fixture_odds_response):
+    return _parse_over_under_category(fixture_odds_response, "card", "Cards")
+
+
 def parse_goals_and_btts_odds(fixture_odds_response):
     """
     Επιστρέφει dict market_name -> {"odds": float, "source": str}, έτοιμο
@@ -115,4 +159,12 @@ def parse_goals_and_btts_odds(fixture_odds_response):
             if picked:
                 result[key] = picked
 
+    return result
+
+
+def parse_all_odds(fixture_odds_response):
+    """Ενοποιημένο dict -- γκολ/BTTS/1X2/Επόμενο Γκολ/Κόρνερ/Κάρτες μαζί."""
+    result = parse_goals_and_btts_odds(fixture_odds_response)
+    result.update(parse_corners_odds(fixture_odds_response))
+    result.update(parse_cards_odds(fixture_odds_response))
     return result

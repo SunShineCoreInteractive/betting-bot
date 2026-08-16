@@ -83,7 +83,7 @@ def _kickoff_str(iso_date):
 
 
 def _get_predictions_for_fixture(fx):
-    """Pre-match μοντέλο goals/BTTS. Επιστρέφει predictions."""
+    """Pre-match μοντέλο: γκολ/BTTS/1X2 + κόρνερ/κάρτες. Επιστρέφει predictions."""
     home_recent = api_football.get_team_recent_fixtures(fx["home_id"])
     away_recent = api_football.get_team_recent_fixtures(fx["away_id"])
 
@@ -94,13 +94,31 @@ def _get_predictions_for_fixture(fx):
     lam_home, lam_away = analysis.compute_expected_goals(home_form, away_form)
 
     odds_response = api_football.get_prematch_odds(fx["id"])
-    odds_lookup = odds_parser.parse_goals_and_btts_odds(
-        odds_response[0] if odds_response else {}
-    )
+    odds_lookup = odds_parser.parse_all_odds(odds_response[0] if odds_response else {})
 
     predictions = analysis.analyze_fixture_goals_markets(
         lam_home, lam_away, odds_lookup, sample_size
     )
+
+    # Κόρνερ / Κάρτες
+    try:
+        home_cc = api_football.get_team_corner_card_form(fx["home_id"], home_recent)
+        away_cc = api_football.get_team_corner_card_form(fx["away_id"], away_recent)
+        lam_corners_home, lam_corners_away = analysis.compute_expected_corners(
+            home_cc["corners"], away_cc["corners"]
+        )
+        lam_cards_home, lam_cards_away = analysis.compute_expected_cards(
+            home_cc["cards"], away_cc["cards"]
+        )
+        corners_sample = min(home_cc["corners"]["sample_size"], away_cc["corners"]["sample_size"])
+        cards_sample = min(home_cc["cards"]["sample_size"], away_cc["cards"]["sample_size"])
+        predictions += analysis.analyze_corners_cards_markets(
+            lam_corners_home, lam_corners_away, lam_cards_home, lam_cards_away,
+            odds_lookup, corners_sample, cards_sample,
+        )
+    except Exception:
+        logger.exception("Σφάλμα κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
+
     return predictions
 
 
@@ -116,14 +134,54 @@ def _get_live_predictions_for_fixture(fx, score_home, score_away, elapsed_minute
     lam_home_full, lam_away_full = analysis.compute_expected_goals(home_form, away_form)
 
     odds_response = api_football.get_live_odds(fx["id"])
-    odds_lookup = odds_parser.parse_goals_and_btts_odds(
-        odds_response[0] if odds_response else {}
-    )
+    odds_lookup = odds_parser.parse_all_odds(odds_response[0] if odds_response else {})
 
     predictions = analysis.analyze_fixture_goals_markets_live(
         score_home, score_away, elapsed_minutes,
         lam_home_full, lam_away_full, odds_lookup, sample_size,
     )
+
+    # Κόρνερ / Κάρτες (live)
+    try:
+        home_cc = api_football.get_team_corner_card_form(fx["home_id"], home_recent)
+        away_cc = api_football.get_team_corner_card_form(fx["away_id"], away_recent)
+        lam_corners_home_full, lam_corners_away_full = analysis.compute_expected_corners(
+            home_cc["corners"], away_cc["corners"]
+        )
+        lam_cards_home_full, lam_cards_away_full = analysis.compute_expected_cards(
+            home_cc["cards"], away_cc["cards"]
+        )
+        corners_sample = min(home_cc["corners"]["sample_size"], away_cc["corners"]["sample_size"])
+        cards_sample = min(home_cc["cards"]["sample_size"], away_cc["cards"]["sample_size"])
+
+        live_stats = api_football.get_fixture_statistics(fx["id"], live=True)
+        current_corners_home = current_corners_away = 0
+        current_cards_home = current_cards_away = 0
+        if live_stats and len(live_stats) >= 2:
+            home_stat = next((s for s in live_stats if s["team"]["id"] == fx["home_id"]), None)
+            away_stat = next((s for s in live_stats if s["team"]["id"] == fx["away_id"]), None)
+            if home_stat:
+                current_corners_home = api_football._extract_stat_value(home_stat, "Corner Kicks") or 0
+                current_cards_home = (
+                    (api_football._extract_stat_value(home_stat, "Yellow Cards") or 0)
+                    + (api_football._extract_stat_value(home_stat, "Red Cards") or 0)
+                )
+            if away_stat:
+                current_corners_away = api_football._extract_stat_value(away_stat, "Corner Kicks") or 0
+                current_cards_away = (
+                    (api_football._extract_stat_value(away_stat, "Yellow Cards") or 0)
+                    + (api_football._extract_stat_value(away_stat, "Red Cards") or 0)
+                )
+
+        predictions += analysis.analyze_corners_cards_markets_live(
+            current_corners_home, current_corners_away, current_cards_home, current_cards_away,
+            elapsed_minutes, lam_corners_home_full, lam_corners_away_full,
+            lam_cards_home_full, lam_cards_away_full,
+            odds_lookup, corners_sample, cards_sample,
+        )
+    except Exception:
+        logger.exception("Σφάλμα live κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
+
     return predictions
 
 
@@ -375,6 +433,24 @@ def check_results():
                 won = analysis.evaluate_next_goal_result(
                     market, events, leg.get("elapsed_at_send"), leg.get("home_team_id")
                 )
+            elif market.endswith("Corners") or market.endswith("Cards"):
+                try:
+                    stats = api_football.get_fixture_statistics(fixture_id)
+                except Exception:
+                    logger.exception("Σφάλμα στατιστικών fixture %s", fixture_id)
+                    continue
+                stat_type = "Corner Kicks" if market.endswith("Corners") else None
+                if stat_type:
+                    total = sum(
+                        (api_football._extract_stat_value(s, stat_type) or 0) for s in (stats or [])
+                    )
+                else:
+                    total = sum(
+                        (api_football._extract_stat_value(s, "Yellow Cards") or 0)
+                        + (api_football._extract_stat_value(s, "Red Cards") or 0)
+                        for s in (stats or [])
+                    )
+                won = analysis.evaluate_stat_market_result(market, total)
             else:
                 score_home = raw_fx["goals"]["home"]
                 score_away = raw_fx["goals"]["away"]

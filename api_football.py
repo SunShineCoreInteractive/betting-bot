@@ -199,6 +199,85 @@ def get_fixture_events(fixture_id):
     return _get("fixtures/events", params={"fixture": fixture_id})
 
 
+def get_fixture_statistics(fixture_id, live=False):
+    """
+    Στατιστικά αγώνα (κόρνερ, κάρτες, κλπ) ανά ομάδα.
+    live=False -> μόνιμο cache (τελειωμένος αγώνας, δεν αλλάζει ποτέ).
+    live=True  -> χωρίς cache (ζωντανός αγώνας, αλλάζει συνέχεια).
+    """
+    if live:
+        return _get("fixtures/statistics", params={"fixture": fixture_id})
+    return _get(
+        "fixtures/statistics", params={"fixture": fixture_id},
+        cache_key=f"fx_stats_{fixture_id}", cache_hours=config.CORNER_CARD_STATS_CACHE_HOURS,
+    )
+
+
+def _extract_stat_value(team_statistics, stat_type):
+    for item in team_statistics.get("statistics", []):
+        if item.get("type") == stat_type:
+            return item.get("value")
+    return None
+
+
+def get_team_corner_card_form(team_id, recent_fixtures):
+    """
+    recent_fixtures: λίστα από το get_team_recent_fixtures (ήδη τραβηγμένη, δεν
+    κάνει νέα κλήση για τη λίστα -- μόνο για τα per-fixture στατιστικά).
+    Επιστρέφει:
+      {
+        "corners": {"avg_scored": .., "avg_conceded": .., "sample_size": ..},
+        "cards": {"avg": .., "sample_size": ..},
+      }
+    """
+    finished = [
+        f for f in recent_fixtures
+        if f["fixture"]["status"]["short"] in ("FT", "AET", "PEN")
+    ][: config.CORNERS_CARDS_LOOKBACK]
+
+    corners_for, corners_against, cards_for = [], [], []
+
+    for f in finished:
+        fid = f["fixture"]["id"]
+        try:
+            stats = get_fixture_statistics(fid)
+        except Exception:
+            logger.exception("Σφάλμα στατιστικών fixture %s", fid)
+            continue
+        if not stats or len(stats) < 2:
+            continue
+
+        team_stats = next((s for s in stats if s["team"]["id"] == team_id), None)
+        opp_stats = next((s for s in stats if s["team"]["id"] != team_id), None)
+        if not team_stats:
+            continue
+
+        corners = _extract_stat_value(team_stats, "Corner Kicks")
+        if corners is not None:
+            corners_for.append(corners)
+
+        if opp_stats:
+            opp_corners = _extract_stat_value(opp_stats, "Corner Kicks")
+            if opp_corners is not None:
+                corners_against.append(opp_corners)
+
+        yellow = _extract_stat_value(team_stats, "Yellow Cards") or 0
+        red = _extract_stat_value(team_stats, "Red Cards") or 0
+        cards_for.append(yellow + red)
+
+    return {
+        "corners": {
+            "avg_scored": (sum(corners_for) / len(corners_for)) if corners_for else 5.0,
+            "avg_conceded": (sum(corners_against) / len(corners_against)) if corners_against else 5.0,
+            "sample_size": len(corners_for),
+        },
+        "cards": {
+            "avg": (sum(cards_for) / len(cards_for)) if cards_for else 2.0,
+            "sample_size": len(cards_for),
+        },
+    }
+
+
 # ── Ομάδες / Στατιστικά / Φόρμα ────────────────────────────────
 
 def get_team_recent_fixtures(team_id, last=None):

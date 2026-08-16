@@ -62,11 +62,17 @@ ACTIVE_MARKET_GROUPS = ["goals_over_under", "btts", "handicap", "team_goals"]
 # ΔΕΝ στέλνουμε πρόβλεψη -- προτιμάμε καμία πρόβλεψη από αναξιόπιστη.
 MAX_PLAUSIBLE_TOTAL_GOALS = 5.0
 
-# Προτιμώμενες στοιχηματικές -- αν υπάρχει odds από αυτές, χρησιμοποιούμε ΜΟΝΟ
-# αυτές (μέσος όρος μεταξύ τους), αλλιώς πέφτουμε πίσω στον γενικό μέσο όρο
-# όλων των bookmakers. Ταίριασμα case-insensitive, substring.
+# Προτιμώμενες στοιχηματικές ...
 PREFERRED_BOOKMAKERS = [
     "novibet", "stoiximan", "pamestoixima", "pame stoixima", "elabet",
     "superbet", "netbet", "winmasters", "interwetten", "bwin", "vistabet",
     "sportingbet", "fonbet", "betsson", "efbet", "bet365",
 ]
+
+# ── Κόρνερ / Κάρτες (Φάση 2) ─────────────────────────────────────
+CORNERS_CARDS_LOOKBACK = 6          # λιγότεροι αγώνες από τα γκολ, γιατί κοστίζει 1 call/αγώνα/ομάδα
+CORNER_CARD_STATS_CACHE_HOURS = 24 * 90   # τα στατιστικά τελειωμένου αγώνα δεν αλλάζουν ποτέ -- μόνιμο cache
+MIN_SAMPLE_SIZE_CORNERS_CARDS = 4
+LEAGUE_AVG_CORNERS = 10.0           # τυπικός μέσος όρος συνολικών κόρνερ/αγώνα
+CORNER_LINES = [8.5, 9.5, 10.5]
+CARD_LINES = [2.5, 3.5, 4.5]
