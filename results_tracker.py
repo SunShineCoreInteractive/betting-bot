@@ -18,9 +18,9 @@ _next_id = 1
 
 def add_pending(channel, description, legs):
     """
-    legs: λίστα από (fixture_id, market_name)
+    legs: λίστα από dicts {"fixture_id":, "market":, "elapsed_at_send": None, "home_team_id": None}
+          (τα δύο τελευταία χρειάζονται μόνο για markets τύπου "Next Goal ...")
     description: το κείμενο που θα εμφανιστεί στο follow-up μήνυμα
-                 (π.χ. "Arsenal vs Brighton — BTTS Yes")
     """
     global _next_id
     entry = {
@@ -28,7 +28,7 @@ def add_pending(channel, description, legs):
         "channel": channel,
         "description": description,
         "legs": legs,
-        "results": {},   # fixture_id -> True/False/None (άγνωστο ακόμα)
+        "results": {},   # index στο legs -> True/False/None (άγνωστο ακόμα)
         "sent_at": time.time(),
     }
     _pending.append(entry)

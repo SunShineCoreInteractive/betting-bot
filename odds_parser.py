@@ -8,6 +8,7 @@
 GOALS_OU_BET_NAMES = {"goals over/under", "over/under"}
 BTTS_BET_NAMES = {"both teams score", "both teams to score"}
 MATCH_WINNER_BET_NAMES = {"match winner", "fulltime result", "1x2", "full time result"}
+NEXT_GOAL_BET_NAMES = {"next goal"}
 
 
 def _collect_values(fixture_odds_response, target_bet_names):
@@ -61,6 +62,18 @@ def parse_goals_and_btts_odds(fixture_odds_response):
     label_map = {"home": "Home Win", "draw": "Draw", "away": "Away Win"}
     for label, odds_list in winner_values.items():
         key = label_map.get(label.lower())
+        if key:
+            result[key] = sum(odds_list) / len(odds_list)
+
+    next_goal_values = _collect_values(fixture_odds_response, NEXT_GOAL_BET_NAMES)
+    next_goal_map = {
+        "home": "Next Goal Home", "home team": "Next Goal Home",
+        "away": "Next Goal Away", "away team": "Next Goal Away",
+        "no goal": "Next Goal No Goal", "none": "Next Goal No Goal",
+        "neither": "Next Goal No Goal", "no more goals": "Next Goal No Goal",
+    }
+    for label, odds_list in next_goal_values.items():
+        key = next_goal_map.get(label.lower())
         if key:
             result[key] = sum(odds_list) / len(odds_list)
 

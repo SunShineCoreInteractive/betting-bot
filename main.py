@@ -168,7 +168,7 @@ def run_prematch_check():
                 results_tracker.add_pending(
                     "singles",
                     f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best_single.market}",
-                    [(fx["id"], best_single.market)],
+                    [{"fixture_id": fx["id"], "market": best_single.market}],
                 )
                 logger.info("Μονό στάλθηκε: %s %s vs %s", best_single.market, fx["home_name"], fx["away_name"])
 
@@ -206,7 +206,7 @@ def run_prematch_check():
                         + " + ".join(p.market for p in legs)
                     )
                     results_tracker.add_pending(
-                        "bet_builder", bb_desc, [(fx["id"], p.market) for p in legs]
+                        "bet_builder", bb_desc, [{"fixture_id": fx["id"], "market": p.market} for p in legs]
                     )
                     logger.info("Bet Builder στάλθηκε: %s vs %s", fx["home_name"], fx["away_name"])
 
@@ -259,7 +259,7 @@ def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
             sent_tracker.mark_sent("parlay_legs_used", fx["id"], "used")
         parlay_desc = "\n".join(legs_desc)
         results_tracker.add_pending(
-            "parlay", parlay_desc, [(fx["id"], pred.market) for fx, _, pred in combo]
+            "parlay", parlay_desc, [{"fixture_id": fx["id"], "market": pred.market} for fx, _, pred in combo]
         )
         logger.info("Παρολί στάλθηκε: %s επιλογές", len(combo))
 
@@ -305,7 +305,12 @@ def run_live_check():
             results_tracker.add_pending(
                 "live",
                 f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best.market} (LIVE)",
-                [(fx["id"], best.market)],
+                [{
+                    "fixture_id": fx["id"],
+                    "market": best.market,
+                    "elapsed_at_send": minute,
+                    "home_team_id": fx["home_id"],
+                }],
             )
             logger.info("Live στάλθηκε: %s %s vs %s", best.market, fx["home_name"], fx["away_name"])
 
@@ -316,9 +321,12 @@ def run_live_check():
 
 def check_results():
     for entry in results_tracker.get_pending():
-        for fixture_id, market in entry["legs"]:
-            if entry["results"].get(fixture_id) is not None:
+        for i, leg in enumerate(entry["legs"]):
+            if entry["results"].get(i) is not None:
                 continue  # ήδη γνωστό αποτέλεσμα για αυτό το leg
+
+            fixture_id = leg["fixture_id"]
+            market = leg["market"]
             try:
                 raw = api_football.get_fixture_by_id(fixture_id)
             except Exception:
@@ -329,12 +337,24 @@ def check_results():
             status = raw[0]["fixture"]["status"]["short"]
             if status not in ("FT", "AET", "PEN"):
                 continue  # δεν έχει τελειώσει ακόμα
-            score_home = raw[0]["goals"]["home"]
-            score_away = raw[0]["goals"]["away"]
-            won = analysis.evaluate_market_result(market, score_home, score_away)
-            entry["results"][fixture_id] = won
 
-        leg_results = [entry["results"].get(fid) for fid, _ in entry["legs"]]
+            if market.startswith("Next Goal"):
+                try:
+                    events = api_football.get_fixture_events(fixture_id)
+                except Exception:
+                    logger.exception("Σφάλμα ανάκτησης events fixture %s", fixture_id)
+                    continue
+                won = analysis.evaluate_next_goal_result(
+                    market, events, leg.get("elapsed_at_send"), leg.get("home_team_id")
+                )
+            else:
+                score_home = raw[0]["goals"]["home"]
+                score_away = raw[0]["goals"]["away"]
+                won = analysis.evaluate_market_result(market, score_home, score_away)
+
+            entry["results"][i] = won
+
+        leg_results = [entry["results"].get(i) for i in range(len(entry["legs"]))]
         if all(r is not None for r in leg_results):
             overall_won = all(leg_results)
             text = telegram_sender.format_result(entry["description"], overall_won)

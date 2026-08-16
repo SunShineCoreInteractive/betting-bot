@@ -302,6 +302,58 @@ def evaluate_market_result(market_name, score_home, score_away):
     return None
 
 
+# ── Επόμενο Γκολ (live) ──────────────────────────────────────────
+
+def prob_next_goal(lam_home_remaining, lam_away_remaining):
+    """
+    Επιστρέφει (p_home_next, p_away_next, p_no_goal) για το υπόλοιπο του αγώνα.
+    Λογική: δύο ανεξάρτητες "γεννήτριες" γκολ -- η πιθανότητα να έρθει πρώτο
+    το γκολ της home είναι ανάλογη του μεριδίου της στο συνολικό αναμενόμενο
+    γκολ, εφόσον μπει έστω ένα ακόμα γκολ στον αγώνα.
+    """
+    total_remaining = lam_home_remaining + lam_away_remaining
+    if total_remaining <= 0:
+        return 0.0, 0.0, 1.0
+
+    p_no_goal = _poisson_pmf(0, total_remaining)
+    p_at_least_one = 1 - p_no_goal
+
+    p_home_next = p_at_least_one * (lam_home_remaining / total_remaining)
+    p_away_next = p_at_least_one * (lam_away_remaining / total_remaining)
+    return p_home_next, p_away_next, p_no_goal
+
+
+def evaluate_next_goal_result(market_name, events, elapsed_at_send, home_team_id):
+    """
+    events: λίστα από το api_football.get_fixture_events (τελικό, μετά τη λήξη).
+    elapsed_at_send: το λεπτό του αγώνα τη στιγμή που στάλθηκε η πρόβλεψη.
+    Επιστρέφει True/False (None δεν επιστρέφεται εδώ -- caller κρίνει βάσει status).
+    """
+    goal_events = [
+        e for e in events
+        if e.get("type") == "Goal"
+        and (e.get("time", {}).get("elapsed") or 0) > (elapsed_at_send or 0)
+    ]
+    goal_events.sort(key=lambda e: (
+        e.get("time", {}).get("elapsed") or 0,
+        e.get("time", {}).get("extra") or 0,
+    ))
+
+    if not goal_events:
+        actual = "No Goal"
+    else:
+        first_goal_team_id = goal_events[0].get("team", {}).get("id")
+        actual = "Home" if first_goal_team_id == home_team_id else "Away"
+
+    if market_name == "Next Goal Home":
+        return actual == "Home"
+    if market_name == "Next Goal Away":
+        return actual == "Away"
+    if market_name == "Next Goal No Goal":
+        return actual == "No Goal"
+    return None
+
+
 # ── Live ανάλυση (Φάση 1) -- ΣΩΣΤΗ εκδοχή που κοιτάει σκορ + χρόνο ──────
 
 def analyze_fixture_goals_markets_live(
@@ -401,6 +453,23 @@ def analyze_fixture_goals_markets_live(
                             f"{elapsed}': τρέχον σκορ {int(score_home or 0)}-{int(score_away or 0)}, "
                             f"εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}"
                         ),
+                    ))
+
+        # Επόμενο Γκολ
+        p_home_next, p_away_next, p_no_goal = prob_next_goal(lam_home_remaining, lam_away_remaining)
+        for market_name, p in [
+            ("Next Goal Home", p_home_next),
+            ("Next Goal Away", p_away_next),
+            ("Next Goal No Goal", p_no_goal),
+        ]:
+            odds = odds_lookup.get(market_name)
+            if odds:
+                ok, edge = is_value_bet(p, odds)
+                if ok:
+                    predictions.append(Prediction(
+                        market=market_name, model_prob=p, odds=odds,
+                        implied_prob=implied_probability(odds), edge=edge,
+                        basis=f"{elapsed}': εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}",
                     ))
 
     return predictions

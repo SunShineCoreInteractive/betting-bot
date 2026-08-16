@@ -170,6 +170,11 @@ def get_fixture_by_id(fixture_id):
     return _get("fixtures", params={"id": fixture_id})
 
 
+def get_fixture_events(fixture_id):
+    """Χρονολόγιο γεγονότων ενός αγώνα (γκολ, κάρτες, κλπ) -- για έλεγχο 'Επόμενο Γκολ'."""
+    return _get("fixtures/events", params={"fixture": fixture_id})
+
+
 # ── Ομάδες / Στατιστικά / Φόρμα ────────────────────────────────
 
 def get_team_recent_fixtures(team_id, last=None):
