@@ -60,11 +60,14 @@ INTERNATIONAL_CLUB_KEYWORDS = [
     "caf champions league", "caf confederation", "afc champions",
 ]
 
+# Λέξεις που δείχνουν φιλικό αγώνα -- αποκλείονται εντελώς, σε οποιαδήποτε μορφή
+FRIENDLY_KEYWORDS = ["friendlies", "friendly"]
+
 # Λέξεις που δείχνουν διοργάνωση εθνικών ομάδων
 NATIONAL_TEAM_KEYWORDS = [
     "world cup", "euro championship", "european championship",
     "copa america", "africa cup", "nations league", "qualification",
-    "friendlies", "confederations cup", "asian cup", "gold cup",
+    "confederations cup", "asian cup", "gold cup",
 ]
 
 EUROPE_CONTINENT_COUNTRIES = None  # γεμίζει δυναμικά από το API αν χρειαστεί
@@ -120,6 +123,10 @@ def classify_leagues():
             "country": country.get("name"),
             "type": league["type"],
         }
+
+        # Φιλικοί αγώνες -- αποκλείονται εντελώς, σε οποιαδήποτε κατηγορία
+        if _matches_any(name_l, FRIENDLY_KEYWORDS):
+            continue
 
         # Διεθνείς διοργανώσεις (χωρίς συγκεκριμένη χώρα, ή World)
         if _matches_any(name_l, INTERNATIONAL_CLUB_KEYWORDS):
