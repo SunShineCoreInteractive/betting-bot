@@ -9,6 +9,7 @@
 import time
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import config
 import api_football
@@ -44,6 +45,15 @@ def startup():
     )
     logger.info("Σύνολο εγκεκριμένων λιγκών: %s", len(ALLOWED_LEAGUE_IDS))
 
+    # Μία φορά, καταγράφουμε όλα τα διαθέσιμα bookmakers στα Logs -- έτσι
+    # μπορείς να δεις αν υπάρχει Stoiximan/Novibet/κλπ χωρίς κανένα άλλο εργαλείο.
+    try:
+        bookmakers = api_football.get_bookmakers()
+        names = sorted(b["name"] for b in bookmakers)
+        logger.info("Διαθέσιμα bookmakers (%s): %s", len(names), ", ".join(names))
+    except Exception:
+        logger.exception("Δεν κατάφερα να τραβήξω τη λίστα bookmakers")
+
 
 def _fixture_basics(fixture):
     country = fixture["league"].get("country") or ""
@@ -62,9 +72,14 @@ def _fixture_basics(fixture):
     }
 
 
+ATHENS_TZ = ZoneInfo("Europe/Athens")
+
+
 def _kickoff_str(iso_date):
-    dt = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
-    return dt.strftime("%H:%M")
+    """Μετατρέπει την ώρα του αγώνα (UTC από το API) σε ώρα Ελλάδας."""
+    dt_utc = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
+    dt_athens = dt_utc.astimezone(ATHENS_TZ)
+    return dt_athens.strftime("%H:%M")
 
 
 def _get_predictions_for_fixture(fx):

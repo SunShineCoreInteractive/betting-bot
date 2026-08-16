@@ -104,6 +104,11 @@ def get_bet_types():
     return _get("odds/bets", cache_key="bet_types", cache_hours=config.BET_TYPES_CACHE_HOURS)
 
 
+def get_bookmakers():
+    """Λίστα όλων των bookmakers που καλύπτει το πλάνο σου, cache 1 εβδομάδα."""
+    return _get("odds/bookmakers", cache_key="bookmakers", cache_hours=config.BET_TYPES_CACHE_HOURS)
+
+
 # ── Αγώνες ─────────────────────────────────────────────────────
 
 def get_fixtures_by_date(date_str, league_ids=None):
