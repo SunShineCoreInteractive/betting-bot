@@ -228,6 +228,29 @@ def analyze_fixture_goals_markets(lam_home, lam_away, odds_lookup, sample_size):
     return predictions
 
 
+# ── Αξιολόγηση αποτελέσματος (μετά το τέλος του αγώνα) ──────────
+
+def evaluate_market_result(market_name, score_home, score_away):
+    """
+    Επιστρέφει True (κέρδισε) / False (έχασε) / None (δεν αναγνωρίζεται το market).
+    Λειτουργεί με τελικό σκορ (μετά τη λήξη).
+    """
+    if score_home is None or score_away is None:
+        return None
+
+    if market_name.startswith("Over"):
+        try:
+            line = float(market_name.split()[1])
+        except (IndexError, ValueError):
+            return None
+        return (score_home + score_away) > line
+
+    if market_name == "BTTS Yes":
+        return score_home > 0 and score_away > 0
+
+    return None
+
+
 # ── Live ανάλυση (Φάση 1) -- ΣΩΣΤΗ εκδοχή που κοιτάει σκορ + χρόνο ──────
 
 def analyze_fixture_goals_markets_live(

@@ -17,6 +17,7 @@ import analysis
 import odds_parser
 import telegram_sender
 import sent_tracker
+import results_tracker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,9 +46,12 @@ def startup():
 
 
 def _fixture_basics(fixture):
+    country = fixture["league"].get("country") or ""
+    league_only = fixture["league"]["name"]
+    league_display = f"{country} — {league_only}" if country else league_only
     return {
         "id": fixture["fixture"]["id"],
-        "league_name": fixture["league"]["name"],
+        "league_name": league_display,
         "league_id": fixture["league"]["id"],
         "season": fixture["league"]["season"],
         "home_id": fixture["teams"]["home"]["id"],
@@ -146,6 +150,11 @@ def run_prematch_check():
             )
             if telegram_sender.send_message("singles", text):
                 sent_tracker.mark_sent("singles", fx["id"], "any")
+                results_tracker.add_pending(
+                    "singles",
+                    f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best_single.market}",
+                    [(fx["id"], best_single.market)],
+                )
                 logger.info("Μονό στάλθηκε: %s %s vs %s", best_single.market, fx["home_name"], fx["away_name"])
 
         # συλλογή για Παρολί (pool, ξεχωριστά ανά αγώνα)
@@ -177,6 +186,13 @@ def run_prematch_check():
                 )
                 if telegram_sender.send_message("bet_builder", text):
                     sent_tracker.mark_sent("bet_builder", fx["id"], key)
+                    bb_desc = (
+                        f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']}\n"
+                        + " + ".join(p.market for p in legs)
+                    )
+                    results_tracker.add_pending(
+                        "bet_builder", bb_desc, [(fx["id"], p.market) for p in legs]
+                    )
                     logger.info("Bet Builder στάλθηκε: %s vs %s", fx["home_name"], fx["away_name"])
 
     # ── Παρολί (2-3 legs, ΔΙΑΦΟΡΕΤΙΚΟΙ αγώνες) ──
@@ -209,12 +225,16 @@ def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
     combined_edge = combined_prob - (1 / combined_odds if combined_odds else 1)
 
     legs_desc = [
-        f"{fx['home_name']} vs {fx['away_name']} — {pred.market} ({pred.odds:.2f})"
+        f"{fx['league_name']}: {fx['home_name']} vs {fx['away_name']} — {pred.market} ({pred.odds:.2f})"
         for fx, _, pred in combo
     ]
     text = telegram_sender.format_parlay(legs_desc, combined_odds, combined_prob, combined_edge)
     if telegram_sender.send_message("parlay", text):
         sent_tracker.mark_sent("parlay", combo_key, "parlay")
+        parlay_desc = "\n".join(legs_desc)
+        results_tracker.add_pending(
+            "parlay", parlay_desc, [(fx["id"], pred.market) for fx, _, pred in combo]
+        )
         logger.info("Παρολί στάλθηκε: %s επιλογές", len(combo))
 
 
@@ -256,9 +276,47 @@ def run_live_check():
         )
         if telegram_sender.send_message("live", text):
             sent_tracker.mark_sent("live", fx["id"], "any")
+            results_tracker.add_pending(
+                "live",
+                f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best.market} (LIVE)",
+                [(fx["id"], best.market)],
+            )
             logger.info("Live στάλθηκε: %s %s vs %s", best.market, fx["home_name"], fx["away_name"])
 
     sent_tracker.clear_finished_live("live", live_ids)
+
+
+# ── Έλεγχος αποτελεσμάτων (ΚΕΡΔΙΣΕ/ΕΧΑΣΕ follow-up) ─────────────
+
+def check_results():
+    for entry in results_tracker.get_pending():
+        for fixture_id, market in entry["legs"]:
+            if entry["results"].get(fixture_id) is not None:
+                continue  # ήδη γνωστό αποτέλεσμα για αυτό το leg
+            try:
+                raw = api_football.get_fixture_by_id(fixture_id)
+            except Exception:
+                logger.exception("Σφάλμα ελέγχου αποτελέσματος fixture %s", fixture_id)
+                continue
+            if not raw:
+                continue
+            status = raw[0]["fixture"]["status"]["short"]
+            if status not in ("FT", "AET", "PEN"):
+                continue  # δεν έχει τελειώσει ακόμα
+            score_home = raw[0]["goals"]["home"]
+            score_away = raw[0]["goals"]["away"]
+            won = analysis.evaluate_market_result(market, score_home, score_away)
+            entry["results"][fixture_id] = won
+
+        leg_results = [entry["results"].get(fid) for fid, _ in entry["legs"]]
+        if all(r is not None for r in leg_results):
+            overall_won = all(leg_results)
+            text = telegram_sender.format_result(entry["description"], overall_won)
+            telegram_sender.send_message(entry["channel"], text)
+            results_tracker.remove(entry["id"])
+            logger.info("Αποτέλεσμα στάλθηκε (%s): %s", "ΚΕΡΔΙΣΕ" if overall_won else "ΕΧΑΣΕ", entry["description"][:60])
+
+    results_tracker.cleanup_stale()
 
 
 # ── Scheduler loop ────────────────────────────────────────────
@@ -268,6 +326,7 @@ def main_loop():
 
     last_prematch_run = 0
     last_live_run = 0
+    last_results_run = 0
 
     while True:
         now = time.time()
@@ -285,6 +344,13 @@ def main_loop():
             except Exception:
                 logger.exception("Σφάλμα στον pre-match κύκλο")
             last_prematch_run = now
+
+        if now - last_results_run >= config.RESULTS_CHECK_INTERVAL_MIN * 60:
+            try:
+                check_results()
+            except Exception:
+                logger.exception("Σφάλμα στον έλεγχο αποτελεσμάτων")
+            last_results_run = now
 
         logger.info("API calls σήμερα μέχρι στιγμής: %s", api_football.get_daily_call_count())
         time.sleep(20)

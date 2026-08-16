@@ -160,6 +160,11 @@ def get_live_odds(fixture_id=None):
     return _get("odds/live", params=params)
 
 
+def get_fixture_by_id(fixture_id):
+    """Τρέχουσα κατάσταση ενός συγκεκριμένου fixture (για έλεγχο αποτελέσματος)."""
+    return _get("fixtures", params={"id": fixture_id})
+
+
 # ── Ομάδες / Στατιστικά / Φόρμα ────────────────────────────────
 
 def get_team_recent_fixtures(team_id, last=None):

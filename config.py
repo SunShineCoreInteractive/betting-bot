@@ -26,6 +26,7 @@ TELEGRAM_CHANNELS = {
 # ── Συχνότητες ελέγχου (λεπτά) ──────────────────────────────────
 PREMATCH_CHECK_INTERVAL_MIN = 5
 LIVE_CHECK_INTERVAL_MIN = 1
+RESULTS_CHECK_INTERVAL_MIN = 5   # πόσο συχνά ελέγχουμε αν τελείωσαν αγώνες για ΚΕΡΔΙΣΕ/ΕΧΑΣΕ
 
 # Το "παράθυρο" pre-match: πόσες ώρες πριν την έναρξη αρχίζουμε να κοιτάμε έναν αγώνα
 PREMATCH_WINDOW_HOURS = 1

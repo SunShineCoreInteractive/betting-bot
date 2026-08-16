@@ -73,6 +73,11 @@ def format_bet_builder(league_name, home, away, kickoff_str, legs_desc, combined
     )
 
 
+def format_result(description, won):
+    emoji = "✅ ΚΕΡΔΙΣΕ" if won else "❌ ΕΧΑΣΕ"
+    return f"{emoji}\n\n{description}"
+
+
 def format_live(league_name, minute, home, away, score_home, score_away,
                  market, model_prob, odds, edge, basis):
     return (
