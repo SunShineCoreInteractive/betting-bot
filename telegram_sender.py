@@ -35,7 +35,8 @@ def send_message(channel_key, text):
         return False
 
 
-def format_single(league_name, home, away, kickoff_str, market, model_prob, odds, edge, basis):
+def format_single(league_name, home, away, kickoff_str, market, model_prob, odds, edge, basis, source=""):
+    source_line = f"🏦 {source}\n" if source else ""
     return (
         f"⚽ <b>AUTO BET (ΜΟΝΑ)</b>\n\n"
         f"{league_name}\n"
@@ -43,6 +44,7 @@ def format_single(league_name, home, away, kickoff_str, market, model_prob, odds
         f"Έναρξη: {kickoff_str}\n\n"
         f"📊 Πρόβλεψη: {market}\n"
         f"Εκτίμηση: {model_prob*100:.0f}% | Απόδοση: {odds:.2f}\n"
+        f"{source_line}"
         f"Edge: +{edge*100:.1f}%\n\n"
         f"📈 Βάση ανάλυσης:\n{basis}"
     )
@@ -79,13 +81,15 @@ def format_result(description, won):
 
 
 def format_live(league_name, minute, home, away, score_home, score_away,
-                 market, model_prob, odds, edge, basis):
+                 market, model_prob, odds, edge, basis, source=""):
+    source_line = f"🏦 {source}\n" if source else ""
     return (
         f"🔴 <b>AUTO BET (LIVE)</b>\n\n"
         f"{league_name} — {minute}'\n"
         f"{home} {score_home}-{score_away} {away}\n\n"
         f"📊 Πρόβλεψη: {market}\n"
         f"Εκτίμηση: {model_prob*100:.0f}% | Απόδοση: {odds:.2f}\n"
+        f"{source_line}"
         f"Edge: +{edge*100:.1f}%\n\n"
         f"📈 Βάση: {basis}"
     )

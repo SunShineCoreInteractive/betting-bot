@@ -32,6 +32,7 @@ class Prediction:
     implied_prob: Optional[float] = None
     edge: Optional[float] = None
     basis: str = ""       # σύντομη εξήγηση
+    source: str = ""      # ποια στοιχηματική δίνει αυτή την απόδοση
 
 
 # ── Poisson βοηθητικά ────────────────────────────────────────────
@@ -236,37 +237,43 @@ def analyze_fixture_goals_markets(lam_home, lam_away, odds_lookup, sample_size):
     for line in lines_to_check:
         p_over = prob_over(line, lam_home, lam_away)
         market_name = f"Over {line} Goals"
-        odds = odds_lookup.get(market_name)
-        if odds:
+        odds_info = odds_lookup.get(market_name)
+        if odds_info:
+            odds = odds_info["odds"]
             ok, edge = is_value_bet(p_over, odds)
             if ok:
                 predictions.append(Prediction(
                     market=market_name, model_prob=p_over, odds=odds,
                     implied_prob=implied_probability(odds), edge=edge,
                     basis=f"Εκτιμώμενα γκολ αγώνα: {lam_home + lam_away:.2f}",
+                    source=odds_info["source"],
                 ))
 
     p_btts = prob_btts_yes(lam_home, lam_away)
-    odds_btts = odds_lookup.get("BTTS Yes")
-    if odds_btts:
-        ok, edge = is_value_bet(p_btts, odds_btts)
+    odds_info = odds_lookup.get("BTTS Yes")
+    if odds_info:
+        odds = odds_info["odds"]
+        ok, edge = is_value_bet(p_btts, odds)
         if ok:
             predictions.append(Prediction(
-                market="BTTS Yes", model_prob=p_btts, odds=odds_btts,
-                implied_prob=implied_probability(odds_btts), edge=edge,
+                market="BTTS Yes", model_prob=p_btts, odds=odds,
+                implied_prob=implied_probability(odds), edge=edge,
                 basis=f"xG home {lam_home:.2f} / away {lam_away:.2f}",
+                source=odds_info["source"],
             ))
 
     p_home_win, p_draw, p_away_win = prob_match_result(lam_home, lam_away)
     for market_name, p in [("Home Win", p_home_win), ("Draw", p_draw), ("Away Win", p_away_win)]:
-        odds = odds_lookup.get(market_name)
-        if odds:
+        odds_info = odds_lookup.get(market_name)
+        if odds_info:
+            odds = odds_info["odds"]
             ok, edge = is_value_bet(p, odds)
             if ok:
                 predictions.append(Prediction(
                     market=market_name, model_prob=p, odds=odds,
                     implied_prob=implied_probability(odds), edge=edge,
                     basis=f"xG home {lam_home:.2f} / away {lam_away:.2f}",
+                    source=odds_info["source"],
                 ))
 
     return predictions
@@ -397,8 +404,9 @@ def analyze_fixture_goals_markets_live(
 
         p_over = prob_over(needed, lam_home_remaining, lam_away_remaining)
         market_name = f"Over {line} Goals"
-        odds = odds_lookup.get(market_name)
-        if odds:
+        odds_info = odds_lookup.get(market_name)
+        if odds_info:
+            odds = odds_info["odds"]
             ok, edge = is_value_bet(p_over, odds)
             if ok:
                 predictions.append(Prediction(
@@ -410,13 +418,14 @@ def analyze_fixture_goals_markets_live(
                         f"εκτιμώμενα στον χρόνο που απομένει: "
                         f"{lam_home_remaining + lam_away_remaining:.2f}"
                     ),
+                    source=odds_info["source"],
                 ))
 
     # BTTS -- λαμβάνει υπόψη αν κάποια ομάδα έχει ήδη σκοράρει
     already_home = (score_home or 0) > 0
     already_away = (score_away or 0) > 0
-    odds_btts = odds_lookup.get("BTTS Yes")
-    if odds_btts and not (already_home and already_away) and remaining_fraction > 0:
+    odds_info_btts = odds_lookup.get("BTTS Yes")
+    if odds_info_btts and not (already_home and already_away) and remaining_fraction > 0:
         if already_home:
             p_btts = 1 - _poisson_pmf(0, lam_away_remaining)
             basis = f"{elapsed}': home ήδη σκόραρε, χρειάζεται away (xG remaining {lam_away_remaining:.2f})"
@@ -429,11 +438,13 @@ def analyze_fixture_goals_markets_live(
             p_btts = p_home_scores * p_away_scores
             basis = f"{elapsed}': κανείς δεν έχει σκοράρει ακόμα, εκτίμηση στον χρόνο που απομένει"
 
-        ok, edge = is_value_bet(p_btts, odds_btts)
+        odds = odds_info_btts["odds"]
+        ok, edge = is_value_bet(p_btts, odds)
         if ok:
             predictions.append(Prediction(
-                market="BTTS Yes", model_prob=p_btts, odds=odds_btts,
-                implied_prob=implied_probability(odds_btts), edge=edge, basis=basis,
+                market="BTTS Yes", model_prob=p_btts, odds=odds,
+                implied_prob=implied_probability(odds), edge=edge, basis=basis,
+                source=odds_info_btts["source"],
             ))
 
     # 1-Χ-2 live -- βάσει τρέχοντος σκορ + εναπομείναντος χρόνου
@@ -442,8 +453,9 @@ def analyze_fixture_goals_markets_live(
             score_home, score_away, lam_home_remaining, lam_away_remaining
         )
         for market_name, p in [("Home Win", p_home_win), ("Draw", p_draw), ("Away Win", p_away_win)]:
-            odds = odds_lookup.get(market_name)
-            if odds:
+            odds_info = odds_lookup.get(market_name)
+            if odds_info:
+                odds = odds_info["odds"]
                 ok, edge = is_value_bet(p, odds)
                 if ok:
                     predictions.append(Prediction(
@@ -453,6 +465,7 @@ def analyze_fixture_goals_markets_live(
                             f"{elapsed}': τρέχον σκορ {int(score_home or 0)}-{int(score_away or 0)}, "
                             f"εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}"
                         ),
+                        source=odds_info["source"],
                     ))
 
         # Επόμενο Γκολ
@@ -462,14 +475,16 @@ def analyze_fixture_goals_markets_live(
             ("Next Goal Away", p_away_next),
             ("Next Goal No Goal", p_no_goal),
         ]:
-            odds = odds_lookup.get(market_name)
-            if odds:
+            odds_info = odds_lookup.get(market_name)
+            if odds_info:
+                odds = odds_info["odds"]
                 ok, edge = is_value_bet(p, odds)
                 if ok:
                     predictions.append(Prediction(
                         market=market_name, model_prob=p, odds=odds,
                         implied_prob=implied_probability(odds), edge=edge,
                         basis=f"{elapsed}': εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}",
+                        source=odds_info["source"],
                     ))
 
     return predictions

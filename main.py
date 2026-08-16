@@ -161,7 +161,7 @@ def run_prematch_check():
             text = telegram_sender.format_single(
                 fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
                 best_single.market, best_single.model_prob, best_single.odds,
-                best_single.edge, best_single.basis,
+                best_single.edge, best_single.basis, best_single.source,
             )
             if telegram_sender.send_message("singles", text):
                 sent_tracker.mark_sent("singles", fx["id"], "any")
@@ -194,7 +194,7 @@ def run_prematch_check():
             key = tuple(sorted(p.market for p in legs))
             if combined_prob >= config.BET_BUILDER_MIN_COMBINED_PROB and \
                not sent_tracker.already_sent("bet_builder", fx["id"], key):
-                legs_desc = [f"{p.market} — εκτίμηση {p.model_prob*100:.0f}%" for p in legs]
+                legs_desc = [f"{p.market} — εκτίμηση {p.model_prob*100:.0f}% ({p.source})" for p in legs]
                 text = telegram_sender.format_bet_builder(
                     fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
                     legs_desc, combined_prob, fair_odds,
@@ -249,7 +249,7 @@ def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
     combined_edge = combined_prob - (1 / combined_odds if combined_odds else 1)
 
     legs_desc = [
-        f"{fx['league_name']}: {fx['home_name']} vs {fx['away_name']} — {pred.market} ({pred.odds:.2f})"
+        f"{fx['league_name']}: {fx['home_name']} vs {fx['away_name']} — {pred.market} ({pred.odds:.2f}, {pred.source})"
         for fx, _, pred in combo
     ]
     text = telegram_sender.format_parlay(legs_desc, combined_odds, combined_prob, combined_edge)
@@ -304,7 +304,7 @@ def run_live_check():
         text = telegram_sender.format_live(
             fx["league_name"], minute, fx["home_name"], fx["away_name"],
             score_home, score_away, best.market, best.model_prob,
-            best.odds, best.edge, best.basis,
+            best.odds, best.edge, best.basis, best.source,
         )
         if telegram_sender.send_message("live", text):
             sent_tracker.mark_sent("live", fx["id"], "any")

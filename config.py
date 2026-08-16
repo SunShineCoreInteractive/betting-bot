@@ -61,3 +61,12 @@ ACTIVE_MARKET_GROUPS = ["goals_over_under", "btts", "handicap", "team_goals"]
 # βγάλει κάτι πιο ψηλό (συνήθως λόγω λίγων/ασταθών δεδομένων σε μικρές λίγκες),
 # ΔΕΝ στέλνουμε πρόβλεψη -- προτιμάμε καμία πρόβλεψη από αναξιόπιστη.
 MAX_PLAUSIBLE_TOTAL_GOALS = 5.0
+
+# Προτιμώμενες στοιχηματικές -- αν υπάρχει odds από αυτές, χρησιμοποιούμε ΜΟΝΟ
+# αυτές (μέσος όρος μεταξύ τους), αλλιώς πέφτουμε πίσω στον γενικό μέσο όρο
+# όλων των bookmakers. Ταίριασμα case-insensitive, substring.
+PREFERRED_BOOKMAKERS = [
+    "novibet", "stoiximan", "pamestoixima", "pame stoixima", "elabet",
+    "superbet", "netbet", "winmasters", "interwetten", "bwin", "vistabet",
+    "sportingbet", "fonbet", "betsson", "efbet", "bet365",
+]
