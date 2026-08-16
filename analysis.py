@@ -66,6 +66,38 @@ def prob_btts_yes(lam_home, lam_away):
     return p_home_scores * p_away_scores
 
 
+def prob_match_result(lam_home, lam_away, max_goals=10):
+    """Επιστρέφει (p_home_win, p_draw, p_away_win) -- 1-Χ-2."""
+    p_home_win, p_draw, p_away_win = 0.0, 0.0, 0.0
+    for h in range(0, max_goals + 1):
+        for a in range(0, max_goals + 1):
+            p = _poisson_pmf(h, lam_home) * _poisson_pmf(a, lam_away)
+            if h > a:
+                p_home_win += p
+            elif h == a:
+                p_draw += p
+            else:
+                p_away_win += p
+    return p_home_win, p_draw, p_away_win
+
+
+def prob_match_result_live(score_home, score_away, lam_home_remaining, lam_away_remaining, max_goals=10):
+    """1-Χ-2 στο live -- προσθέτει τα εναπομείναντα αναμενόμενα γκολ στο ήδη υπάρχον σκορ."""
+    p_home_win, p_draw, p_away_win = 0.0, 0.0, 0.0
+    for h_add in range(0, max_goals + 1):
+        for a_add in range(0, max_goals + 1):
+            p = _poisson_pmf(h_add, lam_home_remaining) * _poisson_pmf(a_add, lam_away_remaining)
+            final_h = (score_home or 0) + h_add
+            final_a = (score_away or 0) + a_add
+            if final_h > final_a:
+                p_home_win += p
+            elif final_h == final_a:
+                p_draw += p
+            else:
+                p_away_win += p
+    return p_home_win, p_draw, p_away_win
+
+
 def prob_team_over(line, lam_team):
     threshold = math.floor(line)
     return max(0.0, min(1.0, 1 - _poisson_cdf(threshold, lam_team)))
@@ -225,6 +257,18 @@ def analyze_fixture_goals_markets(lam_home, lam_away, odds_lookup, sample_size):
                 basis=f"xG home {lam_home:.2f} / away {lam_away:.2f}",
             ))
 
+    p_home_win, p_draw, p_away_win = prob_match_result(lam_home, lam_away)
+    for market_name, p in [("Home Win", p_home_win), ("Draw", p_draw), ("Away Win", p_away_win)]:
+        odds = odds_lookup.get(market_name)
+        if odds:
+            ok, edge = is_value_bet(p, odds)
+            if ok:
+                predictions.append(Prediction(
+                    market=market_name, model_prob=p, odds=odds,
+                    implied_prob=implied_probability(odds), edge=edge,
+                    basis=f"xG home {lam_home:.2f} / away {lam_away:.2f}",
+                ))
+
     return predictions
 
 
@@ -247,6 +291,13 @@ def evaluate_market_result(market_name, score_home, score_away):
 
     if market_name == "BTTS Yes":
         return score_home > 0 and score_away > 0
+
+    if market_name == "Home Win":
+        return score_home > score_away
+    if market_name == "Draw":
+        return score_home == score_away
+    if market_name == "Away Win":
+        return score_away > score_home
 
     return None
 
@@ -332,5 +383,24 @@ def analyze_fixture_goals_markets_live(
                 market="BTTS Yes", model_prob=p_btts, odds=odds_btts,
                 implied_prob=implied_probability(odds_btts), edge=edge, basis=basis,
             ))
+
+    # 1-Χ-2 live -- βάσει τρέχοντος σκορ + εναπομείναντος χρόνου
+    if remaining_fraction > 0:
+        p_home_win, p_draw, p_away_win = prob_match_result_live(
+            score_home, score_away, lam_home_remaining, lam_away_remaining
+        )
+        for market_name, p in [("Home Win", p_home_win), ("Draw", p_draw), ("Away Win", p_away_win)]:
+            odds = odds_lookup.get(market_name)
+            if odds:
+                ok, edge = is_value_bet(p, odds)
+                if ok:
+                    predictions.append(Prediction(
+                        market=market_name, model_prob=p, odds=odds,
+                        implied_prob=implied_probability(odds), edge=edge,
+                        basis=(
+                            f"{elapsed}': τρέχον σκορ {int(score_home or 0)}-{int(score_away or 0)}, "
+                            f"εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}"
+                        ),
+                    ))
 
     return predictions
