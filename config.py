@@ -91,9 +91,13 @@ API_BASKETBALL_BASE_URL = f"https://{API_BASKETBALL_HOST}"
 API_BASKETBALL_HEADERS = {"x-apisports-key": API_BASKETBALL_KEY}
 
 BASKETBALL_DAILY_CALL_BUDGET = 100   # δωρεάν πλάνο -- ΠΟΛΥ μικρότερο από το ποδόσφαιρο
-BASKETBALL_CHECK_INTERVAL_HOURS = 6   # ελέγχουμε 4 φορές/μέρα, όχι συνεχώς
+BASKETBALL_CHECK_INTERVAL_HOURS = 12   # ελέγχουμε 2 φορές/μέρα -- πιο αραιά λόγω περισσότερων λιγκών
 
-BASKETBALL_LEAGUES = ["NBA", "Euroleague", "Greek Basket League"]  # ονόματα προς αναζήτηση, resolve δυναμικά
+BASKETBALL_LEAGUES = [
+    "NBA", "Euroleague", "Greek Basket League",
+    "ACB", "Lega Basket", "Basketbol", "Bundesliga", "Betclic",
+]  # ονόματα προς αναζήτηση, δυναμικό resolve -- σκόπιμα σύντομα/χωρίς τόνους
+   # για να μην χαθεί το ταίριασμα λόγω διαφορετικής γραφής (π.χ. "Süper" vs "Super")
 BASKETBALL_SEASON = "2026-2027"  # θα ενημερωθεί όταν ξεκινήσει η σεζόν
 
 BASKETBALL_STD_TOTAL_POINTS = 12.0   # τυπική απόκλιση συνολικών πόντων -- εμπειρική εκτίμηση
