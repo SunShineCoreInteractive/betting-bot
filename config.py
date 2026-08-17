@@ -99,30 +99,6 @@ CARD_LINES = [2.5, 3.5, 4.5]
 DAILY_CALL_BUDGET = 7500
 DAILY_BUDGET_SAFETY_MARGIN = 500   # όταν απομένουν λιγότερα από αυτά, κόβουμε τα non-core markets
 
-# ── Basketball (νέο άθλημα, ξεχωριστό API) ─────────────────────
-API_BASKETBALL_KEY = os.environ.get("API_BASKETBALL_KEY", "")
-API_BASKETBALL_HOST = "v1.basketball.api-sports.io"
-API_BASKETBALL_BASE_URL = f"https://{API_BASKETBALL_HOST}"
-API_BASKETBALL_HEADERS = {"x-apisports-key": API_BASKETBALL_KEY}
-
-BASKETBALL_DAILY_CALL_BUDGET = 100   # δωρεάν πλάνο -- ΠΟΛΥ μικρότερο από το ποδόσφαιρο
-BASKETBALL_CHECK_INTERVAL_HOURS = 12   # ελέγχουμε 2 φορές/μέρα -- πιο αραιά λόγω περισσότερων λιγκών
-
-BASKETBALL_LEAGUES = [
-    "NBA", "Euroleague", "Greek Basket League",
-    "ACB", "Lega Basket", "Basketbol", "Bundesliga", "Betclic",
-]  # ονόματα προς αναζήτηση, δυναμικό resolve -- σκόπιμα σύντομα/χωρίς τόνους
-   # για να μην χαθεί το ταίριασμα λόγω διαφορετικής γραφής (π.χ. "Süper" vs "Super")
-BASKETBALL_SEASON = "2026-2027"  # θα ενημερωθεί όταν ξεκινήσει η σεζόν
-
-BASKETBALL_STD_TOTAL_POINTS = 12.0   # τυπική απόκλιση συνολικών πόντων -- εμπειρική εκτίμηση
-BASKETBALL_STD_POINT_DIFF = 11.0     # τυπική απόκλιση διαφοράς σκορ -- εμπειρική εκτίμηση
-BASKETBALL_MIN_SAMPLE_SIZE = 5
-BASKETBALL_TEAM_STATS_CACHE_HOURS = 24 * 3  # 3 μέρες -- πολύ πιο αραιά ενημερώσεις λόγω μικρού budget
-
-# Χρησιμοποιούμε τα ΙΔΙΑ κανάλια Μονά/Παρολί με το ποδόσφαιρο (με ξεχωριστό emoji/label)
-BASKETBALL_USE_SAME_CHANNELS = True
-
 # ── Σκόρερ (Φάση 2β) ─────────────────────────────────────────────
 PLAYER_STATS_CACHE_HOURS = 24
 SCORER_MIN_MINUTES = 450          # ελάχιστα λεπτά συμμετοχής season για αξιόπιστη εκτίμηση (~5 αγώνες)
