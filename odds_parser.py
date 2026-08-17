@@ -9,6 +9,8 @@
 "μέσος όρος αγοράς" (όχι συγκεκριμένη στοιχηματική).
 """
 
+import statistics
+
 import config
 
 GOALS_OU_BET_NAMES = {"goals over/under", "over/under"}
@@ -52,6 +54,9 @@ def _pick_odds(entries):
     """
     entries: [(odd, bookmaker_name), ...] για ΕΝΑ market/outcome.
     Επιστρέφει {"odds": float, "source": str} -- προτιμώντας τις PREFERRED_BOOKMAKERS.
+    Χρησιμοποιούμε ΔΙΑΜΕΣΟ (median) αντί για μέσο όρο -- πολύ πιο ανθεκτικό σε
+    ακραίες/"χαλασμένες" τιμές που εμφανίζονται καμιά φορά σε λιγότερο "ρευστά"
+    markets (π.χ. κόρνερ σε μικρότερες λίγκες).
     """
     if not entries:
         return None
@@ -61,13 +66,13 @@ def _pick_odds(entries):
     if preferred_entries:
         odds_values = [odd for odd, _ in preferred_entries]
         names = sorted(set(name for _, name in preferred_entries))
-        avg_odd = sum(odds_values) / len(odds_values)
-        source = names[0] if len(names) == 1 else f"{', '.join(names)} (μ.ό.)"
-        return {"odds": avg_odd, "source": source}
+        median_odd = statistics.median(odds_values)
+        source = names[0] if len(names) == 1 else f"{', '.join(names)} (διάμεσος)"
+        return {"odds": median_odd, "source": source}
 
     odds_values = [odd for odd, _ in entries]
-    avg_odd = sum(odds_values) / len(odds_values)
-    return {"odds": avg_odd, "source": f"Μέσος όρος αγοράς ({len(entries)} bookmakers)"}
+    median_odd = statistics.median(odds_values)
+    return {"odds": median_odd, "source": f"Διάμεσος αγοράς ({len(entries)} bookmakers)"}
 
 
 def _parse_over_under_category(fixture_odds_response, name_keyword, category_label):
