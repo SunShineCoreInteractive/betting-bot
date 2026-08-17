@@ -20,6 +20,9 @@ import telegram_sender
 import sent_tracker
 import results_tracker
 import scorer_matcher
+import api_basketball
+import basketball_analysis
+import basketball_odds_parser
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +32,7 @@ logger = logging.getLogger("main")
 
 # Γεμίζει στο startup
 ALLOWED_LEAGUE_IDS = set()
+BASKETBALL_LEAGUE_IDS = {}   # {"NBA": id, "Euroleague": id, "Greek Basket League": id}
 
 
 def startup():
@@ -54,6 +58,19 @@ def startup():
         logger.info("Διαθέσιμα bookmakers (%s): %s", len(names), ", ".join(names))
     except Exception:
         logger.exception("Δεν κατάφερα να τραβήξω τη λίστα bookmakers")
+
+    # Basketball -- resolve league IDs δυναμικά (μία φορά, δεν ξοδεύει πολύ budget)
+    global BASKETBALL_LEAGUE_IDS
+    try:
+        for name in config.BASKETBALL_LEAGUES:
+            league_id = api_basketball.resolve_league_id(name)
+            if league_id:
+                BASKETBALL_LEAGUE_IDS[name] = league_id
+                logger.info("Basketball λίγκα βρέθηκε: %s -> id %s", name, league_id)
+            else:
+                logger.warning("Basketball λίγκα ΔΕΝ βρέθηκε: %s", name)
+    except Exception:
+        logger.exception("Σφάλμα resolve βασκετικών λιγκών")
 
 
 def _fixture_basics(fixture):
@@ -508,22 +525,37 @@ def run_live_check():
 def check_results():
     pending = results_tracker.get_pending()
 
-    # Μαζεύουμε ΟΛΑ τα fixture_id που χρειάζονται έλεγχο (χωρίς διπλότυπα),
-    # και τα ελέγχουμε σε ομάδες των 20 -- αντί για 1 κλήση/leg.
-    needed_ids = set()
+    # Ξεχωρίζουμε ποδόσφαιρο/μπάσκετ -- διαφορετικό API, διαφορετική δομή ID
+    needed_football_ids = set()
+    needed_basketball_ids = set()
     for entry in pending:
         for i, leg in enumerate(entry["legs"]):
-            if entry["results"].get(i) is None:
-                needed_ids.add(leg["fixture_id"])
+            if entry["results"].get(i) is not None:
+                continue
+            if leg.get("sport") == "basketball":
+                needed_basketball_ids.add(leg["fixture_id"])
+            else:
+                needed_football_ids.add(leg["fixture_id"])
 
     fixtures_by_id = {}
-    needed_ids_list = list(needed_ids)
+    needed_ids_list = list(needed_football_ids)
     for chunk_start in range(0, len(needed_ids_list), 20):
         chunk = needed_ids_list[chunk_start:chunk_start + 20]
         try:
             fixtures_by_id.update(api_football.get_fixtures_by_ids(chunk))
         except Exception:
             logger.exception("Σφάλμα batch ελέγχου αποτελεσμάτων για %s fixtures", len(chunk))
+
+    bball_games_by_id = {}
+    if needed_basketball_ids and not api_basketball.budget_is_low():
+        for bball_fid in needed_basketball_ids:
+            real_id = bball_fid.replace("bball_", "")
+            try:
+                games = api_basketball.get_game_by_id(real_id)
+                if games:
+                    bball_games_by_id[bball_fid] = games[0]
+            except Exception:
+                logger.exception("Σφάλμα ελέγχου αποτελέσματος μπάσκετ %s", bball_fid)
 
     for entry in pending:
         for i, leg in enumerate(entry["legs"]):
@@ -532,6 +564,19 @@ def check_results():
 
             fixture_id = leg["fixture_id"]
             market = leg["market"]
+
+            if leg.get("sport") == "basketball":
+                raw_game = bball_games_by_id.get(fixture_id)
+                if not raw_game:
+                    continue
+                if raw_game["status"]["short"] != "FT":
+                    continue
+                home_pts = raw_game["scores"]["home"]["total"]
+                away_pts = raw_game["scores"]["away"]["total"]
+                won = basketball_analysis.evaluate_market_result(market, home_pts, away_pts)
+                entry["results"][i] = won
+                continue
+
             raw_fx = fixtures_by_id.get(fixture_id)
             if not raw_fx:
                 continue
@@ -591,6 +636,156 @@ def check_results():
     results_tracker.cleanup_stale()
 
 
+# ── Basketball κύκλος (αραιός, λόγω μικρού budget) ──────────────
+
+def run_basketball_check():
+    if api_basketball.budget_is_low():
+        logger.warning("Basketball: χαμηλό budget -- παραλείπεται ο κύκλος")
+        return
+
+    today_str = datetime.now(ATHENS_TZ).strftime("%Y-%m-%d")
+    all_predictions = []  # [(game, kickoff_str, BballPrediction), ...] -- για parlay pool
+
+    for league_name, league_id in BASKETBALL_LEAGUE_IDS.items():
+        try:
+            games = api_basketball.get_games_by_date(league_id, config.BASKETBALL_SEASON, today_str)
+        except Exception:
+            logger.exception("Σφάλμα φόρτωσης αγώνων μπάσκετ (%s)", league_name)
+            continue
+
+        logger.info("Basketball %s: %s αγώνες σήμερα", league_name, len(games))
+
+        for g in games:
+            if g["status"]["short"] != "NS":  # μόνο αγώνες που δεν έχουν ξεκινήσει ακόμα
+                continue
+            if api_basketball.budget_is_low():
+                break
+
+            game_id = g["id"]
+            home_id = g["teams"]["home"]["id"]
+            away_id = g["teams"]["away"]["id"]
+            home_name = g["teams"]["home"]["name"]
+            away_name = g["teams"]["away"]["name"]
+            season = g["league"]["season"]
+
+            try:
+                home_stats = api_basketball.get_team_statistics(home_id, league_id, season)
+                away_stats = api_basketball.get_team_statistics(away_id, league_id, season)
+            except Exception:
+                logger.exception("Σφάλμα στατιστικών ομάδων μπάσκετ (game %s)", game_id)
+                continue
+
+            # Το API-Basketball statistics endpoint δίνει ήδη μέσους όρους season -- προσαρμόζουμε format
+            home_form = _bball_stats_to_form(home_stats)
+            away_form = _bball_stats_to_form(away_stats)
+            sample_size = min(home_form["sample_size"], away_form["sample_size"])
+
+            exp_home, exp_away = basketball_analysis.compute_expected_points(home_form, away_form)
+
+            try:
+                odds_response = api_basketball.get_odds_by_game(game_id)
+            except Exception:
+                logger.exception("Σφάλμα odds μπάσκετ (game %s)", game_id)
+                continue
+            odds_lookup = basketball_odds_parser.parse_game_odds(
+                odds_response[0] if odds_response else {}
+            )
+
+            predictions = basketball_analysis.analyze_game(exp_home, exp_away, sample_size, odds_lookup)
+
+            kickoff_str = _kickoff_str(g["date"])
+            league_display = f"🏀 {league_name}"
+
+            for pred in predictions:
+                if sent_tracker.already_sent("bball_singles", game_id, pred.market):
+                    continue
+                text = (
+                    f"🏀 <b>AUTO BET (ΜΟΝΑ)</b>\n\n"
+                    f"{league_display}\n"
+                    f"{home_name} vs {away_name}\n"
+                    f"Έναρξη: {kickoff_str}\n\n"
+                    f"📊 Πρόβλεψη: {pred.market}\n"
+                    f"Εκτίμηση: {pred.model_prob*100:.0f}% | Απόδοση: {pred.odds:.2f}\n"
+                    f"🏦 {pred.source}\n"
+                    f"Edge: +{pred.edge*100:.1f}%\n\n"
+                    f"📈 Βάση ανάλυσης:\n{pred.basis}"
+                )
+                if telegram_sender.send_message("singles", text):
+                    sent_tracker.mark_sent("bball_singles", game_id, pred.market)
+                    results_tracker.add_pending(
+                        "singles",
+                        f"{league_display}\n{home_name} vs {away_name} — {pred.market}",
+                        [{"fixture_id": f"bball_{game_id}", "market": pred.market, "sport": "basketball"}],
+                    )
+                    logger.info("Basketball Μονό στάλθηκε: %s %s vs %s", pred.market, home_name, away_name)
+
+                all_predictions.append((
+                    {"id": game_id, "home_name": home_name, "away_name": away_name, "league_display": league_display},
+                    kickoff_str, pred,
+                ))
+
+    _run_basketball_parlay(all_predictions)
+
+
+def _bball_stats_to_form(stats):
+    """Μετατρέπει το raw statistics response του API-Basketball σε avg_scored/avg_allowed/sample_size."""
+    if not stats:
+        return {"avg_scored": 100.0, "avg_allowed": 100.0, "sample_size": 0}
+    games_played = stats.get("games", {}).get("played", {}).get("all", 0) or 0
+    points_for = stats.get("points", {}).get("for", {}).get("average", {}).get("all")
+    points_against = stats.get("points", {}).get("against", {}).get("average", {}).get("all")
+    try:
+        avg_scored = float(points_for) if points_for is not None else 100.0
+        avg_allowed = float(points_against) if points_against is not None else 100.0
+    except (TypeError, ValueError):
+        avg_scored, avg_allowed = 100.0, 100.0
+    return {"avg_scored": avg_scored, "avg_allowed": avg_allowed, "sample_size": games_played}
+
+
+def _run_basketball_parlay(all_predictions):
+    if len(all_predictions) < config.PARLAY_MIN_LEGS:
+        return
+
+    best_per_game = {}
+    for game, kickoff_str, pred in all_predictions:
+        current = best_per_game.get(game["id"])
+        if current is None or (pred.edge or 0) > (current[2].edge or 0):
+            best_per_game[game["id"]] = (game, kickoff_str, pred)
+
+    candidates = sorted(best_per_game.values(), key=lambda t: -(t[2].edge or 0))
+    if len(candidates) < config.PARLAY_MIN_LEGS:
+        return
+
+    combo = candidates[: config.PARLAY_MAX_LEGS]
+    combo_key = tuple(sorted(g["id"] for g, _, _ in combo))
+
+    if sent_tracker.already_sent("bball_parlay", combo_key, "parlay"):
+        return
+
+    combined_prob = 1.0
+    combined_odds = 1.0
+    for _, _, pred in combo:
+        combined_prob *= pred.model_prob
+        combined_odds *= pred.odds
+
+    if combined_prob < config.PARLAY_MIN_COMBINED_PROB:
+        return
+
+    combined_edge = combined_prob - (1 / combined_odds if combined_odds else 1)
+    legs_desc = [
+        f"{g['league_display']}: {g['home_name']} vs {g['away_name']} — {pred.market} ({pred.odds:.2f}, {pred.source})"
+        for g, _, pred in combo
+    ]
+    text = telegram_sender.format_parlay(legs_desc, combined_odds, combined_prob, combined_edge)
+    if telegram_sender.send_message("parlay", text):
+        sent_tracker.mark_sent("bball_parlay", combo_key, "parlay")
+        results_tracker.add_pending(
+            "parlay", "\n".join(legs_desc),
+            [{"fixture_id": f"bball_{g['id']}", "market": pred.market, "sport": "basketball"} for g, _, pred in combo]
+        )
+        logger.info("Basketball Παρολί στάλθηκε: %s επιλογές", len(combo))
+
+
 # ── Scheduler loop ────────────────────────────────────────────
 
 def main_loop():
@@ -599,6 +794,7 @@ def main_loop():
     last_prematch_run = 0
     last_live_run = 0
     last_results_run = 0
+    last_basketball_run = 0
 
     while True:
         now = time.time()
@@ -624,7 +820,17 @@ def main_loop():
                 logger.exception("Σφάλμα στον έλεγχο αποτελεσμάτων")
             last_results_run = now
 
-        logger.info("API calls σήμερα μέχρι στιγμής: %s", api_football.get_daily_call_count())
+        if now - last_basketball_run >= config.BASKETBALL_CHECK_INTERVAL_HOURS * 3600:
+            try:
+                run_basketball_check()
+            except Exception:
+                logger.exception("Σφάλμα στον κύκλο μπάσκετ")
+            last_basketball_run = now
+
+        logger.info(
+            "API calls σήμερα -- Ποδόσφαιρο: %s | Μπάσκετ: %s",
+            api_football.get_daily_call_count(), api_basketball.get_daily_call_count(),
+        )
         time.sleep(20)
 
 
