@@ -300,11 +300,31 @@ def _get_live_predictions_for_fixture(fx, score_home, score_away, elapsed_minute
 
 # ── Pre-match κύκλος (Μονά / Παρολί / Bet Builder) ───────────────
 
+def _market_family_label(market):
+    if market.startswith("Over") and market.endswith("Goals"):
+        return "Goals O/U"
+    if market.startswith("BTTS"):
+        return "BTTS"
+    if market in ("Home Win", "Draw", "Away Win"):
+        return "1X2"
+    if market.startswith("Next Goal"):
+        return "Next Goal"
+    if market.endswith("Corners"):
+        return "Corners"
+    if market.endswith("Cards"):
+        return "Cards"
+    if market.startswith("Anytime Goalscorer") or market.startswith("First Goalscorer"):
+        return "Scorer"
+    return "Other"
+
+
 def run_prematch_check():
     fixtures = api_football.get_fixtures_in_window(
         config.PREMATCH_WINDOW_HOURS, ALLOWED_LEAGUE_IDS
     )
     logger.info("Pre-match παράθυρο: %s αγώνες", len(fixtures))
+
+    market_family_counts = {}  # διαγνωστικό -- πόσες ΑΚΑΤΕΡΓΑΣΤΕΣ προβλέψεις βγήκαν ανά τύπο, πριν το φίλτρο
 
     fixture_ids_in_window = {f["fixture"]["id"] for f in fixtures}
     for ch in ("singles", "bet_builder"):
@@ -322,6 +342,10 @@ def run_prematch_check():
         except Exception:
             logger.exception("Σφάλμα ανάλυσης fixture %s", fx["id"])
             continue
+
+        for p in predictions:
+            family = _market_family_label(p.market)
+            market_family_counts[family] = market_family_counts.get(family, 0) + 1
 
         if not predictions:
             continue
@@ -391,6 +415,11 @@ def run_prematch_check():
                     logger.info("Bet Builder στάλθηκε: %s vs %s", fx["home_name"], fx["away_name"])
 
     # ── Παρολί (2-3 legs, ΔΙΑΦΟΡΕΤΙΚΟΙ αγώνες) ──
+    logger.info(
+        "Διαγνωστικό markets (ΠΡΙΝ το φίλτρο καναλιού) -- %s",
+        ", ".join(f"{k}: {v}" for k, v in sorted(market_family_counts.items())) or "καμία πρόβλεψη καθόλου",
+    )
+
     run_parlay_from_pool(parlay_pool, fixture_ids_in_window)
 
 
