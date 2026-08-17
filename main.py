@@ -243,12 +243,30 @@ def _get_live_predictions_for_fixture(fx, score_home, score_away, elapsed_minute
 
     lam_home_full, lam_away_full = analysis.compute_expected_goals(home_form, away_form)
 
+    # Κόκκινες κάρτες -- επηρεάζουν όλα τα live markets (Γκολ, BTTS, 1Χ2, Επόμενο Γκολ)
+    try:
+        events = api_football.get_fixture_events_cached(fx["id"])
+    except Exception:
+        logger.exception("Σφάλμα ανάκτησης live events fixture %s", fx["id"])
+        events = []
+    home_red_cards = sum(
+        1 for e in (events or [])
+        if e.get("type") == "Card" and "red" in (e.get("detail") or "").lower()
+        and e.get("team", {}).get("id") == fx["home_id"]
+    )
+    away_red_cards = sum(
+        1 for e in (events or [])
+        if e.get("type") == "Card" and "red" in (e.get("detail") or "").lower()
+        and e.get("team", {}).get("id") == fx["away_id"]
+    )
+
     odds_response = api_football.get_live_odds(fx["id"])
     odds_lookup = odds_parser.parse_all_odds(odds_response[0] if odds_response else {})
 
     predictions = analysis.analyze_fixture_goals_markets_live(
         score_home, score_away, elapsed_minutes,
         lam_home_full, lam_away_full, odds_lookup, sample_size,
+        home_red_cards=home_red_cards, away_red_cards=away_red_cards,
     )
 
     # Κόρνερ / Κάρτες (live) -- παραλείπονται αν πλησιάζουμε το ημερήσιο πλαφόν

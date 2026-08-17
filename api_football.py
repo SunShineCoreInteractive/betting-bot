@@ -253,6 +253,28 @@ def get_fixture_events(fixture_id):
     return _get("fixtures/events", params={"fixture": fixture_id})
 
 
+_live_events_cache = {}  # {fixture_id: (timestamp, events)}
+
+
+def get_fixture_events_cached(fixture_id, max_age_seconds=None):
+    """
+    Ίδιο με το get_fixture_events, αλλά με μικρό cache σε δευτερόλεπτα (όχι ώρες)
+    -- ώστε το live μοντέλο να μην ζητάει events σε ΚΑΘΕ κύκλο (κάθε 1 λεπτό),
+    μόνο κάθε ~3 λεπτά. Εξοικονομεί κλήσεις χωρίς να χάνει σημαντική ταχύτητα
+    αντίδρασης σε γεγονότα όπως κόκκινες κάρτες.
+    """
+    max_age_seconds = max_age_seconds or config.RED_CARD_EVENTS_CACHE_SECONDS
+    now = time.time()
+    if fixture_id in _live_events_cache:
+        ts, events = _live_events_cache[fixture_id]
+        if (now - ts) < max_age_seconds:
+            return events
+
+    events = get_fixture_events(fixture_id)
+    _live_events_cache[fixture_id] = (now, events)
+    return events
+
+
 def get_fixture_statistics(fixture_id, live=False):
     """
     Στατιστικά αγώνα (κόρνερ, κάρτες, κλπ) ανά ομάδα.

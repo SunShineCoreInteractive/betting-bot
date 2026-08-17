@@ -550,16 +550,47 @@ def evaluate_next_goal_result(market_name, events, elapsed_at_send, home_team_id
 
 # ── Live ανάλυση (Φάση 1) -- ΣΩΣΤΗ εκδοχή που κοιτάει σκορ + χρόνο ──────
 
+def apply_red_card_adjustment(lam_home_remaining, lam_away_remaining, home_reds, away_reds):
+    """
+    Προσαρμόζει το εναπομείναν αναμενόμενο γκολ όταν υπάρχουν κόκκινες κάρτες.
+    Η ομάδα με λιγότερους παίκτες σκοράρει λιγότερο -- η αντίπαλη σκοράρει
+    περισσότερο, αφού παίζει έναντι αδύναμης άμυνας/λιγότερων παικτών.
+    Εμπειρική εκτίμηση, όχι επιστημονικά τεκμηριωμένη -- βλ. config για τα ποσοστά.
+    """
+    net = (home_reds or 0) - (away_reds or 0)
+    if net == 0:
+        return lam_home_remaining, lam_away_remaining, ""
+
+    if net > 0:
+        # Η home ομάδα έχει περισσότερες κόκκινες -- μειονεκτεί
+        reduction = min(config.RED_CARD_MAX_REDUCTION, net * config.RED_CARD_OWN_REDUCTION_PER_CARD)
+        boost = min(config.RED_CARD_MAX_BOOST, net * config.RED_CARD_OPPONENT_BOOST_PER_CARD)
+        lam_home_remaining *= (1 - reduction)
+        lam_away_remaining *= (1 + boost)
+        note = f"⚠️ Κόκκινη κάρτα home ({net}) -- προσαρμοσμένο αναμενόμενο γκολ"
+    else:
+        n = -net
+        reduction = min(config.RED_CARD_MAX_REDUCTION, n * config.RED_CARD_OWN_REDUCTION_PER_CARD)
+        boost = min(config.RED_CARD_MAX_BOOST, n * config.RED_CARD_OPPONENT_BOOST_PER_CARD)
+        lam_away_remaining *= (1 - reduction)
+        lam_home_remaining *= (1 + boost)
+        note = f"⚠️ Κόκκινη κάρτα away ({n}) -- προσαρμοσμένο αναμενόμενο γκολ"
+
+    return lam_home_remaining, lam_away_remaining, note
+
+
 def analyze_fixture_goals_markets_live(
     score_home, score_away, elapsed_minutes,
     lam_home_full, lam_away_full, odds_lookup, sample_size,
+    home_red_cards=0, away_red_cards=0,
 ):
     """
     Σε αντίθεση με το analyze_fixture_goals_markets (pre-match), εδώ:
       1. Παίρνουμε υπόψη τα γκολ που έχουν ΗΔΗ σκοραριστεί
       2. Προσαρμόζουμε το αναμενόμενο γκολ στον χρόνο που ΑΠΟΜΕΝΕΙ, όχι σε
          ολόκληρο το ματς
-      3. Αν το μοντέλο δίνει εξωπραγματικά ψηλό σύνολο (πιθανό σημάδι
+      3. Προσαρμόζουμε ΚΑΙ για κόκκινες κάρτες (αν υπάρχουν)
+      4. Αν το μοντέλο δίνει εξωπραγματικά ψηλό σύνολο (πιθανό σημάδι
          αναξιόπιστων δεδομένων), δεν στέλνουμε καμία πρόβλεψη
     """
     if sample_size < config.MIN_SAMPLE_SIZE:
@@ -577,6 +608,10 @@ def analyze_fixture_goals_markets_live(
 
     lam_home_remaining = lam_home_full * remaining_fraction
     lam_away_remaining = lam_away_full * remaining_fraction
+
+    lam_home_remaining, lam_away_remaining, red_card_note = apply_red_card_adjustment(
+        lam_home_remaining, lam_away_remaining, home_red_cards, away_red_cards
+    )
 
     current_total = (score_home or 0) + (score_away or 0)
 
@@ -604,6 +639,7 @@ def analyze_fixture_goals_markets_live(
                         f"{elapsed}' -- χρειάζονται {needed:.1f} ακόμα γκολ, "
                         f"εκτιμώμενα στον χρόνο που απομένει: "
                         f"{lam_home_remaining + lam_away_remaining:.2f}"
+                        + (f"\n{red_card_note}" if red_card_note else "")
                     ),
                     source=odds_info["source"],
                 ))
@@ -615,15 +651,15 @@ def analyze_fixture_goals_markets_live(
     if odds_info_btts and not (already_home and already_away) and remaining_fraction > 0:
         if already_home:
             p_btts = 1 - _poisson_pmf(0, lam_away_remaining)
-            basis = f"{elapsed}': home ήδη σκόραρε, χρειάζεται away (xG remaining {lam_away_remaining:.2f})"
+            basis = f"{elapsed}': home ήδη σκόραρε, χρειάζεται away (xG remaining {lam_away_remaining:.2f})" + (f"\n{red_card_note}" if red_card_note else "")
         elif already_away:
             p_btts = 1 - _poisson_pmf(0, lam_home_remaining)
-            basis = f"{elapsed}': away ήδη σκόραρε, χρειάζεται home (xG remaining {lam_home_remaining:.2f})"
+            basis = f"{elapsed}': away ήδη σκόραρε, χρειάζεται home (xG remaining {lam_home_remaining:.2f})" + (f"\n{red_card_note}" if red_card_note else "")
         else:
             p_home_scores = 1 - _poisson_pmf(0, lam_home_remaining)
             p_away_scores = 1 - _poisson_pmf(0, lam_away_remaining)
             p_btts = p_home_scores * p_away_scores
-            basis = f"{elapsed}': κανείς δεν έχει σκοράρει ακόμα, εκτίμηση στον χρόνο που απομένει"
+            basis = f"{elapsed}': κανείς δεν έχει σκοράρει ακόμα, εκτίμηση στον χρόνο που απομένει" + (f"\n{red_card_note}" if red_card_note else "")
 
         odds = odds_info_btts["odds"]
         ok, edge = is_value_bet(p_btts, odds)
@@ -651,6 +687,7 @@ def analyze_fixture_goals_markets_live(
                         basis=(
                             f"{elapsed}': τρέχον σκορ {int(score_home or 0)}-{int(score_away or 0)}, "
                             f"εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}"
+                            + (f"\n{red_card_note}" if red_card_note else "")
                         ),
                         source=odds_info["source"],
                     ))
@@ -670,7 +707,7 @@ def analyze_fixture_goals_markets_live(
                     predictions.append(Prediction(
                         market=market_name, model_prob=p, odds=odds,
                         implied_prob=implied_probability(odds), edge=edge,
-                        basis=f"{elapsed}': εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}",
+                        basis=f"{elapsed}': εναπομείναντα xG {lam_home_remaining:.2f}/{lam_away_remaining:.2f}" + (f"\n{red_card_note}" if red_card_note else ""),
                         source=odds_info["source"],
                     ))
 

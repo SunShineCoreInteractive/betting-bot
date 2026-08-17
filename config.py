@@ -45,6 +45,15 @@ LIVE_MIN_PROB = 0.60
 LIVE_ODDS_MIN = 1.30
 LIVE_ODDS_MAX = 5.00
 
+# ── Προσαρμογή για κόκκινη κάρτα (live) ──────────────────────────
+# Εμπειρικές εκτιμήσεις (όχι επιστημονικά τεκμηριωμένες) -- η ομάδα με
+# λιγότερους παίκτες σκοράρει λιγότερο, η αντίπαλη σκοράρει περισσότερο.
+RED_CARD_OWN_REDUCTION_PER_CARD = 0.25   # -25% στο δικό της αναμενόμενο γκολ ανά κόκκινη
+RED_CARD_OPPONENT_BOOST_PER_CARD = 0.30  # +30% στο αντίπαλο αναμενόμενο γκολ ανά κόκκινη
+RED_CARD_MAX_REDUCTION = 0.50            # πλαφόν -- να μην πάει η μείωση σε παράλογα νούμερα
+RED_CARD_MAX_BOOST = 0.60
+RED_CARD_EVENTS_CACHE_SECONDS = 180      # ανανέωση events κάθε 3 λεπτά, όχι κάθε live κύκλο (1')
+
 PARLAY_COMBINED_ODDS_MIN = 2.00
 PARLAY_COMBINED_ODDS_MAX = 7.00
 
