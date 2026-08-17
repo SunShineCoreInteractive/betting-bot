@@ -1,7 +1,12 @@
 """
 Ο μαέστρος. Τρέχει συνέχεια (24ωρο loop) και:
-  - κάθε PREMATCH_CHECK_INTERVAL_MIN λεπτά -> ελέγχει αγώνες στο pre-match παράθυρο
-  - κάθε LIVE_CHECK_INTERVAL_MIN λεπτά     -> ελέγχει ζωντανούς αγώνες
+  - κάθε MARKET_CHECK_INTERVAL_HOURS ώρες -> ελέγχει αγώνες στο κυλιόμενο παράθυρο
+    (χωρίς Live -- μόνο pre-match)
+  - κάθε RESULTS_CHECK_INTERVAL_MIN λεπτά  -> ελέγχει αν τελείωσαν αγώνες, και
+    ΕΠΕΞΕΡΓΑΖΕΤΑΙ το αρχικό μήνυμα προσθέτοντας ✅/❌
+
+Κάθε πρόβλεψη πηγαίνει στο δικό της κανάλι market (config.BET_TYPE_CHANNELS),
+όχι σε γενικά κανάλια Μονά/Παρολί/Bet Builder όπως πριν.
 
 Εκτελείται σαν Render "Background Worker" (συνεχής διεργασία, όχι cron).
 """
@@ -231,92 +236,7 @@ def _analyze_scorers(fx, lam_home, lam_away, odds_response):
 
     return predictions
 
-
-def _get_live_predictions_for_fixture(fx, score_home, score_away, elapsed_minutes):
-    """Live μοντέλο -- λαμβάνει υπόψη τρέχον σκορ + χρόνο που απομένει."""
-    home_recent = api_football.get_team_recent_fixtures(fx["home_id"])
-    away_recent = api_football.get_team_recent_fixtures(fx["away_id"])
-
-    home_form = analysis.team_form_from_fixtures(home_recent, fx["home_id"])
-    away_form = analysis.team_form_from_fixtures(away_recent, fx["away_id"])
-    sample_size = min(home_form["sample_size"], away_form["sample_size"])
-
-    lam_home_full, lam_away_full = analysis.compute_expected_goals(home_form, away_form)
-
-    # Κόκκινες κάρτες -- επηρεάζουν όλα τα live markets (Γκολ, BTTS, 1Χ2, Επόμενο Γκολ)
-    try:
-        events = api_football.get_fixture_events_cached(fx["id"])
-    except Exception:
-        logger.exception("Σφάλμα ανάκτησης live events fixture %s", fx["id"])
-        events = []
-    home_red_cards = sum(
-        1 for e in (events or [])
-        if e.get("type") == "Card" and "red" in (e.get("detail") or "").lower()
-        and e.get("team", {}).get("id") == fx["home_id"]
-    )
-    away_red_cards = sum(
-        1 for e in (events or [])
-        if e.get("type") == "Card" and "red" in (e.get("detail") or "").lower()
-        and e.get("team", {}).get("id") == fx["away_id"]
-    )
-
-    odds_response = api_football.get_live_odds(fx["id"])
-    odds_lookup = odds_parser.parse_all_odds(odds_response[0] if odds_response else {})
-
-    predictions = analysis.analyze_fixture_goals_markets_live(
-        score_home, score_away, elapsed_minutes,
-        lam_home_full, lam_away_full, odds_lookup, sample_size,
-        home_red_cards=home_red_cards, away_red_cards=away_red_cards,
-    )
-
-    # Κόρνερ / Κάρτες (live) -- παραλείπονται αν πλησιάζουμε το ημερήσιο πλαφόν
-    if not api_football.budget_is_low():
-        try:
-            home_cc = api_football.get_team_corner_card_form(fx["home_id"], home_recent)
-            away_cc = api_football.get_team_corner_card_form(fx["away_id"], away_recent)
-            lam_corners_home_full, lam_corners_away_full = analysis.compute_expected_corners(
-                home_cc["corners"], away_cc["corners"]
-            )
-            lam_cards_home_full, lam_cards_away_full = analysis.compute_expected_cards(
-                home_cc["cards"], away_cc["cards"]
-            )
-            corners_sample = min(home_cc["corners"]["sample_size"], away_cc["corners"]["sample_size"])
-            cards_sample = min(home_cc["cards"]["sample_size"], away_cc["cards"]["sample_size"])
-
-            live_stats = api_football.get_fixture_statistics(fx["id"], live=True)
-            current_corners_home = current_corners_away = 0
-            current_cards_home = current_cards_away = 0
-            if live_stats and len(live_stats) >= 2:
-                home_stat = next((s for s in live_stats if s["team"]["id"] == fx["home_id"]), None)
-                away_stat = next((s for s in live_stats if s["team"]["id"] == fx["away_id"]), None)
-                if home_stat:
-                    current_corners_home = api_football._extract_stat_value(home_stat, "Corner Kicks") or 0
-                    current_cards_home = (
-                        (api_football._extract_stat_value(home_stat, "Yellow Cards") or 0)
-                        + (api_football._extract_stat_value(home_stat, "Red Cards") or 0)
-                    )
-                if away_stat:
-                    current_corners_away = api_football._extract_stat_value(away_stat, "Corner Kicks") or 0
-                    current_cards_away = (
-                        (api_football._extract_stat_value(away_stat, "Yellow Cards") or 0)
-                        + (api_football._extract_stat_value(away_stat, "Red Cards") or 0)
-                    )
-
-            predictions += analysis.analyze_corners_cards_markets_live(
-                current_corners_home, current_corners_away, current_cards_home, current_cards_away,
-                elapsed_minutes, lam_corners_home_full, lam_corners_away_full,
-                lam_cards_home_full, lam_cards_away_full,
-                odds_lookup, corners_sample, cards_sample,
-            )
-        except Exception:
-            logger.exception("Σφάλμα live κόρνερ/καρτών ανάλυσης fixture %s", fx["id"])
-    else:
-        logger.warning("Χαμηλό ημερήσιο budget -- παραλείπονται live κόρνερ/κάρτες για fixture %s", fx["id"])
-
-    return predictions
-
-
-# ── Pre-match κύκλος (Μονά / Παρολί / Bet Builder) ───────────────
+# ── Ταξινόμηση market -> κανάλι ─────────────────────────────────
 
 def _market_family_label(market):
     if market.startswith("Over") and market.endswith("Goals"):
@@ -325,8 +245,6 @@ def _market_family_label(market):
         return "BTTS"
     if market in ("Home Win", "Draw", "Away Win"):
         return "1X2"
-    if market.startswith("Next Goal"):
-        return "Next Goal"
     if market.endswith("Corners"):
         return "Corners"
     if market.endswith("Cards"):
@@ -336,20 +254,34 @@ def _market_family_label(market):
     return "Other"
 
 
-def run_prematch_check():
-    fixtures = api_football.get_fixtures_in_window(
-        config.PREMATCH_WINDOW_HOURS, ALLOWED_LEAGUE_IDS
-    )
-    logger.info("Pre-match παράθυρο: %s αγώνες", len(fixtures))
+def _channel_for_prediction(pred):
+    family = _market_family_label(pred.market)
+    return config.MARKET_FAMILY_TO_CHANNEL.get(family)
 
-    market_family_counts = {}  # διαγνωστικό -- πόσες ΑΚΑΤΕΡΓΑΣΤΕΣ προβλέψεις βγήκαν ανά τύπο, πριν το φίλτρο
+
+def _passes_global_filter(pred):
+    """Καθολικό φίλτρο -- πιθανότητα 55%+ (στόχος 60%), απόδοση 1.20+ χωρίς ανώτατο όριο."""
+    if pred.model_prob < config.MIN_MODEL_PROBABILITY:
+        return False
+    if pred.odds is None or pred.odds < config.MIN_ODDS:
+        return False
+    return True
+
+
+# ── Κύριος κύκλος ελέγχου markets (κάθε MARKET_CHECK_INTERVAL_HOURS) ──
+
+def run_market_check():
+    fixtures = api_football.get_fixtures_in_window(
+        config.MARKET_CHECK_INTERVAL_HOURS, ALLOWED_LEAGUE_IDS
+    )
+    logger.info("Παράθυρο ελέγχου (%sω): %s αγώνες", config.MARKET_CHECK_INTERVAL_HOURS, len(fixtures))
 
     fixture_ids_in_window = {f["fixture"]["id"] for f in fixtures}
-    for ch in ("singles", "bet_builder"):
-        sent_tracker.clear_expired_prematch(ch, fixture_ids_in_window)
-    sent_tracker.clear_expired_parlay("parlay", fixture_ids_in_window)
+    for channel_key in config.BET_TYPE_CHANNELS:
+        sent_tracker.clear_expired_prematch(channel_key, fixture_ids_in_window)
 
-    parlay_pool = []  # [(fx, Prediction), ...] υποψήφιοι από διαφορετικούς αγώνες
+    market_family_counts = {}
+    sent_counts = {}
 
     for raw_fx in fixtures:
         fx = _fixture_basics(raw_fx)
@@ -365,217 +297,50 @@ def run_prematch_check():
             family = _market_family_label(p.market)
             market_family_counts[family] = market_family_counts.get(family, 0) + 1
 
-        if not predictions:
-            continue
-
-        # ── Μονά (1 μόνο μήνυμα/αγώνα -- η γραμμή με το μεγαλύτερο edge,
-        #    μέσα στα όρια πιθανότητας/απόδοσης του καναλιού) ──
-        singles_candidates = [
-            p for p in predictions
-            if p.model_prob >= config.SINGLES_MIN_PROB
-            and config.SINGLES_ODDS_MIN <= p.odds <= config.SINGLES_ODDS_MAX
-        ]
-        if singles_candidates:
-            best_single = max(singles_candidates, key=lambda p: p.edge or 0)
-            if not sent_tracker.already_sent("singles", fx["id"], "any"):
-                text = telegram_sender.format_single(
-                    fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
-                    best_single.market, best_single.model_prob, best_single.odds,
-                    best_single.edge, best_single.basis, best_single.source,
-                )
-                if telegram_sender.send_message("singles", text):
-                    sent_tracker.mark_sent("singles", fx["id"], "any")
-                    results_tracker.add_pending(
-                        "singles",
-                        f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best_single.market}",
-                        [{"fixture_id": fx["id"], "market": best_single.market, "player_id": best_single.player_id}],
-                    )
-                    logger.info("Μονό στάλθηκε: %s %s vs %s", best_single.market, fx["home_name"], fx["away_name"])
-
-        # συλλογή για Παρολί (pool, ξεχωριστά ανά αγώνα)
         for pred in predictions:
-            parlay_pool.append((fx, kickoff_str, pred))
-
-        # ── Bet Builder (ίδιος αγώνας, 2-3 legs) ──
-        eligible_bb = [p for p in predictions if p.model_prob >= config.BET_BUILDER_MIN_LEG_PROB]
-        # απόφευξε αντιφατικά/επικαλυπτόμενα markets (π.χ. δύο διαφορετικές Over γραμμές μαζί)
-        non_redundant = []
-        seen_families = set()
-        for p in sorted(eligible_bb, key=lambda x: -x.model_prob):
-            family = p.market.split()[0]  # π.χ. "Over", "BTTS"
-            if family in seen_families:
+            if not _passes_global_filter(pred):
                 continue
-            seen_families.add(family)
-            non_redundant.append(p)
 
-        if len(non_redundant) >= config.BET_BUILDER_MIN_LEGS:
-            legs = non_redundant[: config.BET_BUILDER_MAX_LEGS]
-            combined_prob, fair_odds = analysis.combine_bet_builder(legs)
-            key = tuple(sorted(p.market for p in legs))
-            if combined_prob >= config.BET_BUILDER_MIN_COMBINED_PROB and \
-               config.BET_BUILDER_ODDS_MIN <= fair_odds <= config.BET_BUILDER_ODDS_MAX and \
-               not sent_tracker.already_sent("bet_builder", fx["id"], key):
-                legs_desc = [f"{p.market} — εκτίμηση {p.model_prob*100:.0f}% ({p.source})" for p in legs]
-                text = telegram_sender.format_bet_builder(
-                    fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
-                    legs_desc, combined_prob, fair_odds,
+            channel_key = _channel_for_prediction(pred)
+            if not channel_key:
+                continue  # market χωρίς αντιστοιχισμένο κανάλι ακόμα (Κύμα 2)
+
+            if sent_tracker.already_sent(channel_key, fx["id"], pred.market):
+                continue
+
+            text = telegram_sender.format_prediction(
+                fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
+                pred.market, pred.model_prob, pred.odds, pred.edge, pred.basis, pred.source,
+            )
+            message_id = telegram_sender.send_message(channel_key, text)
+            if message_id:
+                sent_tracker.mark_sent(channel_key, fx["id"], pred.market)
+                results_tracker.add_pending(
+                    channel_key, message_id, text,
+                    [{"fixture_id": fx["id"], "market": pred.market, "player_id": pred.player_id}],
                 )
-                if telegram_sender.send_message("bet_builder", text):
-                    sent_tracker.mark_sent("bet_builder", fx["id"], key)
-                    bb_desc = (
-                        f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']}\n"
-                        + " + ".join(p.market for p in legs)
-                    )
-                    results_tracker.add_pending(
-                        "bet_builder", bb_desc,
-                        [{"fixture_id": fx["id"], "market": p.market, "player_id": p.player_id} for p in legs]
-                    )
-                    logger.info("Bet Builder στάλθηκε: %s vs %s", fx["home_name"], fx["away_name"])
+                sent_counts[channel_key] = sent_counts.get(channel_key, 0) + 1
+                logger.info(
+                    "Στάλθηκε [%s] %s: %s vs %s (%.0f%%, odds %.2f)",
+                    channel_key, pred.market, fx["home_name"], fx["away_name"],
+                    pred.model_prob * 100, pred.odds,
+                )
 
-    # ── Παρολί (2-3 legs, ΔΙΑΦΟΡΕΤΙΚΟΙ αγώνες) ──
     logger.info(
-        "Διαγνωστικό markets (ΠΡΙΝ το φίλτρο καναλιού) -- %s",
+        "Διαγνωστικό markets (ΠΡΙΝ το φίλτρο) -- %s",
         ", ".join(f"{k}: {v}" for k, v in sorted(market_family_counts.items())) or "καμία πρόβλεψη καθόλου",
     )
-
-    run_parlay_from_pool(parlay_pool, fixture_ids_in_window)
-
-
-def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
-    sent_tracker.clear_expired_parlay("parlay", fixture_ids_in_window)
-    sent_tracker.clear_expired_prematch("parlay_legs_used", fixture_ids_in_window)
-
-    # ένα leg ανά αγώνα -- κρατάμε το καλύτερο (μεγαλύτερο edge) ανά fixture,
-    # ΕΞΑΙΡΩΝΤΑΣ αγώνες που έχουν ήδη χρησιμοποιηθεί σε προηγούμενο Παρολί
-    # (ώστε το ίδιο ματς να μην ξαναμπαίνει σε νέο συνδυασμό κάθε 5 λεπτά)
-    best_per_fixture = {}
-    for fx, kickoff_str, pred in parlay_pool:
-        if sent_tracker.already_sent("parlay_legs_used", fx["id"], "used"):
-            continue
-        current = best_per_fixture.get(fx["id"])
-        if current is None or (pred.edge or 0) > (current[2].edge or 0):
-            best_per_fixture[fx["id"]] = (fx, kickoff_str, pred)
-
-    candidates = sorted(best_per_fixture.values(), key=lambda t: -(t[2].edge or 0))
-
-    if len(candidates) < config.PARLAY_MIN_LEGS:
-        return
-
-    combo = candidates[: config.PARLAY_MAX_LEGS]
-    combo_key = tuple(sorted(f["id"] for f, _, _ in combo))
-
-    if sent_tracker.already_sent("parlay", combo_key, "parlay"):
-        return
-
-    legs = [pred for _, _, pred in combo]
-    combined_prob, combined_odds = analysis.combine_parlay(legs)
-
-    if combined_prob < config.PARLAY_MIN_COMBINED_PROB:
-        return  # δεν φτάνει το ελάχιστο 60% -- δεν στέλνουμε
-    if not (config.PARLAY_COMBINED_ODDS_MIN <= combined_odds <= config.PARLAY_COMBINED_ODDS_MAX):
-        return  # εκτός του επιθυμητού εύρους απόδοσης
-
-    combined_edge = combined_prob - (1 / combined_odds if combined_odds else 1)
-    legs_desc = [
-        f"{fx['league_name']}: {fx['home_name']} vs {fx['away_name']} — {pred.market} ({pred.odds:.2f}, {pred.source})"
-        for fx, _, pred in combo
-    ]
-    text = telegram_sender.format_parlay(legs_desc, combined_odds, combined_prob, combined_edge)
-    if telegram_sender.send_message("parlay", text):
-        sent_tracker.mark_sent("parlay", combo_key, "parlay")
-        for fx, _, _ in combo:
-            sent_tracker.mark_sent("parlay_legs_used", fx["id"], "used")
-        parlay_desc = "\n".join(legs_desc)
-        results_tracker.add_pending(
-            "parlay", parlay_desc,
-            [{"fixture_id": fx["id"], "market": pred.market, "player_id": pred.player_id} for fx, _, pred in combo]
-        )
-        logger.info("Παρολί στάλθηκε: %s επιλογές", len(combo))
-
-
-# ── Live κύκλος ────────────────────────────────────────────────
-
-def run_live_check():
-    live_fixtures = api_football.get_live_fixtures()
-    logger.info("Live fixtures: %s", len(live_fixtures))
-
-    live_ids = set()
-    stats = {"checked": 0, "wrong_league": 0, "no_predictions": 0, "sent": 0, "already_sent": 0}
-
-    for raw_fx in live_fixtures:
-        if raw_fx["league"]["id"] not in ALLOWED_LEAGUE_IDS:
-            stats["wrong_league"] += 1
-            continue
-        fx = _fixture_basics(raw_fx)
-        live_ids.add(fx["id"])
-        stats["checked"] += 1
-
-        minute = raw_fx["fixture"]["status"]["elapsed"]
-        score_home = raw_fx["goals"]["home"]
-        score_away = raw_fx["goals"]["away"]
-
-        try:
-            predictions = _get_live_predictions_for_fixture(fx, score_home, score_away, minute)
-        except Exception:
-            logger.exception("Σφάλμα live ανάλυσης fixture %s", fx["id"])
-            continue
-
-        if not predictions:
-            stats["no_predictions"] += 1
-            continue
-
-        # 1 μόνο μήνυμα ανά αγώνα -- η γραμμή με το μεγαλύτερο edge,
-        # μέσα στα όρια πιθανότητας/απόδοσης του καναλιού Live
-        live_candidates = [
-            p for p in predictions
-            if p.model_prob >= config.LIVE_MIN_PROB
-            and config.LIVE_ODDS_MIN <= p.odds <= config.LIVE_ODDS_MAX
-        ]
-        if not live_candidates:
-            stats["no_predictions"] += 1
-            continue
-
-        best = max(live_candidates, key=lambda p: p.edge or 0)
-
-        if sent_tracker.already_sent("live", fx["id"], "any"):
-            stats["already_sent"] += 1
-            continue
-        text = telegram_sender.format_live(
-            fx["league_name"], minute, fx["home_name"], fx["away_name"],
-            score_home, score_away, best.market, best.model_prob,
-            best.odds, best.edge, best.basis, best.source,
-        )
-        if telegram_sender.send_message("live", text):
-            sent_tracker.mark_sent("live", fx["id"], "any")
-            stats["sent"] += 1
-            results_tracker.add_pending(
-                "live",
-                f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best.market} (LIVE)",
-                [{
-                    "fixture_id": fx["id"],
-                    "market": best.market,
-                    "elapsed_at_send": minute,
-                    "home_team_id": fx["home_id"],
-                }],
-            )
-            logger.info("Live στάλθηκε: %s %s vs %s", best.market, fx["home_name"], fx["away_name"])
-
     logger.info(
-        "Live σύνοψη: %s εγκεκριμένης λίγκας, %s χωρίς πρόβλεψη (καμία ευκαιρία/odds/δείγμα), "
-        "%s ήδη σταλμένα, %s νέα μηνύματα (%s εκτός λίγκας)",
-        stats["checked"], stats["no_predictions"], stats["already_sent"], stats["sent"], stats["wrong_league"],
+        "Στάλθηκαν ανά κανάλι -- %s",
+        ", ".join(f"{k}: {v}" for k, v in sorted(sent_counts.items())) or "κανένα νέο μήνυμα",
     )
 
-    sent_tracker.clear_finished_live("live", live_ids)
 
-
-# ── Έλεγχος αποτελεσμάτων (ΚΕΡΔΙΣΕ/ΕΧΑΣΕ follow-up) ─────────────
+# ── Έλεγχος αποτελεσμάτων (επεξεργασία μηνύματος με ✅/❌) ─────────
 
 def check_results():
     pending = results_tracker.get_pending()
 
-    # Μαζεύουμε ΟΛΑ τα fixture_id που χρειάζονται έλεγχο (χωρίς διπλότυπα),
-    # και τα ελέγχουμε σε ομάδες των 20 -- αντί για 1 κλήση/leg.
     needed_ids = set()
     for entry in pending:
         for i, leg in enumerate(entry["legs"]):
@@ -594,7 +359,7 @@ def check_results():
     for entry in pending:
         for i, leg in enumerate(entry["legs"]):
             if entry["results"].get(i) is not None:
-                continue  # ήδη γνωστό αποτέλεσμα για αυτό το leg
+                continue
 
             fixture_id = leg["fixture_id"]
             market = leg["market"]
@@ -604,18 +369,9 @@ def check_results():
                 continue
             status = raw_fx["fixture"]["status"]["short"]
             if status not in ("FT", "AET", "PEN"):
-                continue  # δεν έχει τελειώσει ακόμα
+                continue
 
-            if market.startswith("Next Goal"):
-                try:
-                    events = api_football.get_fixture_events(fixture_id)
-                except Exception:
-                    logger.exception("Σφάλμα ανάκτησης events fixture %s", fixture_id)
-                    continue
-                won = analysis.evaluate_next_goal_result(
-                    market, events, leg.get("elapsed_at_send"), leg.get("home_team_id")
-                )
-            elif market.startswith("Anytime Goalscorer") or market.startswith("First Goalscorer"):
+            if market.startswith("Anytime Goalscorer") or market.startswith("First Goalscorer"):
                 try:
                     events = api_football.get_fixture_events(fixture_id)
                 except Exception:
@@ -650,10 +406,15 @@ def check_results():
         leg_results = [entry["results"].get(i) for i in range(len(entry["legs"]))]
         if all(r is not None for r in leg_results):
             overall_won = all(leg_results)
-            text = telegram_sender.format_result(entry["description"], overall_won)
-            telegram_sender.send_message(entry["channel"], text)
-            results_tracker.remove(entry["id"])
-            logger.info("Αποτέλεσμα στάλθηκε (%s): %s", "ΚΕΡΔΙΣΕ" if overall_won else "ΕΧΑΣΕ", entry["description"][:60])
+            success = telegram_sender.edit_message_add_result(
+                entry["channel"], entry["message_id"], entry["original_text"], overall_won
+            )
+            if success:
+                results_tracker.remove(entry["id"])
+                logger.info(
+                    "Αποτέλεσμα ενημερώθηκε (%s) στο κανάλι %s (msg %s)",
+                    "ΚΕΡΔΙΣΕ" if overall_won else "ΕΧΑΣΕ", entry["channel"], entry["message_id"],
+                )
 
     results_tracker.cleanup_stale()
 
@@ -663,26 +424,18 @@ def check_results():
 def main_loop():
     startup()
 
-    last_prematch_run = 0
-    last_live_run = 0
+    last_market_run = 0
     last_results_run = 0
 
     while True:
         now = time.time()
 
-        if now - last_live_run >= config.LIVE_CHECK_INTERVAL_MIN * 60:
+        if now - last_market_run >= config.MARKET_CHECK_INTERVAL_HOURS * 3600:
             try:
-                run_live_check()
+                run_market_check()
             except Exception:
-                logger.exception("Σφάλμα στον live κύκλο")
-            last_live_run = now
-
-        if now - last_prematch_run >= config.PREMATCH_CHECK_INTERVAL_MIN * 60:
-            try:
-                run_prematch_check()
-            except Exception:
-                logger.exception("Σφάλμα στον pre-match κύκλο")
-            last_prematch_run = now
+                logger.exception("Σφάλμα στον κύκλο markets")
+            last_market_run = now
 
         if now - last_results_run >= config.RESULTS_CHECK_INTERVAL_MIN * 60:
             try:
@@ -692,7 +445,7 @@ def main_loop():
             last_results_run = now
 
         logger.info("API calls σήμερα μέχρι στιγμής: %s", api_football.get_daily_call_count())
-        time.sleep(20)
+        time.sleep(30)
 
 
 if __name__ == "__main__":

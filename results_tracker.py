@@ -1,8 +1,9 @@
 """
 Θυμάται τι έστειλε το πρόγραμμα (ποιος αγώνας, ποιο market, ποιο κανάλι) και,
-όταν ο/οι αγώνας/ες τελειώσουν, στέλνει follow-up μήνυμα: ΚΕΡΔΙΣΕ / ΕΧΑΣΕ.
+όταν ο/οι αγώνας/ες τελειώσουν, ΕΠΕΞΕΡΓΑΖΕΤΑΙ το ίδιο μήνυμα προσθέτοντας
+✅ ΚΕΡΔΙΣΕ / ❌ ΕΧΑΣΕ, αντί να στέλνει νέο μήνυμα.
 
-Λειτουργεί και για συνδυασμούς (Παρολί/Bet Builder): το αποτέλεσμα στέλνεται
+Λειτουργεί και για συνδυασμούς (Combo Bets): το αποτέλεσμα ενημερώνεται
 μόνο όταν ΟΛΟΙ οι αγώνες του συνδυασμού έχουν τελειώσει, και είναι "ΚΕΡΔΙΣΕ"
 μόνο αν κερδίσουν ΟΛΕΣ οι επιλογές.
 """
@@ -16,17 +17,21 @@ _pending = []
 _next_id = 1
 
 
-def add_pending(channel, description, legs):
+def add_pending(channel, message_id, original_text, legs):
     """
+    channel: κλειδί από το config.BET_TYPE_CHANNELS (π.χ. "1x2", "gg_ng")
+    message_id: το Telegram message_id που επιστράφηκε όταν στάλθηκε το μήνυμα
+                -- χρειάζεται για να το επεξεργαστούμε αργότερα
+    original_text: το ΠΛΗΡΕΣ κείμενο του μηνύματος όπως στάλθηκε (θα προστεθεί
+                    το emoji ΣΤΟ ΤΕΛΟΣ αυτού, όχι σε ξεχωριστό μήνυμα)
     legs: λίστα από dicts {"fixture_id":, "market":, "elapsed_at_send": None, "home_team_id": None}
-          (τα δύο τελευταία χρειάζονται μόνο για markets τύπου "Next Goal ...")
-    description: το κείμενο που θα εμφανιστεί στο follow-up μήνυμα
     """
     global _next_id
     entry = {
         "id": _next_id,
         "channel": channel,
-        "description": description,
+        "message_id": message_id,
+        "original_text": original_text,
         "legs": legs,
         "results": {},   # index στο legs -> True/False/None (άγνωστο ακόμα)
         "sent_at": time.time(),
