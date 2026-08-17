@@ -22,6 +22,20 @@ TIER2_PATTERNS = [
     r"segunda", r"2\.\s*liga", r"1\.\s*lig\b", r"serie\s*b",
     r"division\s*2", r"liga\s*2", r"challenger", r"nationale\s*2",
     r"eerste\s*divisie", r"obos", r"superettan", r"i\s*liga\b",
+    r"^1\.\s*divisjon\b", r"^1\.\s*division\b",   # Νορβηγία/Δανία: "1. divisjon/Division" = tier2
+]
+
+# Λέξεις-κλειδιά που δείχνουν 3η κατηγορία ΚΑΙ ΚΑΤΩ -- αυτές αποκλείονται ΕΝΤΕΛΩΣ
+# (πιο ειδικές από το γενικό TIER2_PATTERNS, ώστε να μην μπερδεύονται π.χ. με
+# "2. Bundesliga"/"2. Liga" της Γερμανίας/Πολωνίας που ΕΙΝΑΙ tier2)
+TIER3_PLUS_PATTERNS = [
+    r"^[2-9]\.\s*divisjon\b",   # Νορβηγία: "2. divisjon" και πάνω = tier3+
+    r"^[2-9]\.\s*division\b",  # Δανία: "2. Division" και πάνω = tier3+
+    r"^(3|4|5)\.\s*(liga|lig|bundesliga)\b",
+    r"\bthird\s*division\b", r"\bfourth\s*division\b",
+    r"\bregionalliga\b", r"\boberliga\b", r"\blandesliga\b",
+    r"\bbezirksliga\b", r"\bkreisliga\b",
+    r"\bserie\s*c\b", r"\bserie\s*d\b",   # Ιταλία: Serie C/D = tier3/tier4
 ]
 
 # Ρητές χώρες όπου θέλουμε ΜΟΝΟ tier 1 (ζητήθηκε ρητά)
@@ -73,9 +87,26 @@ NATIONAL_TEAM_KEYWORDS = [
 EUROPE_CONTINENT_COUNTRIES = None  # γεμίζει δυναμικά από το API αν χρειαστεί
 
 
+def _main_segment(name: str) -> str:
+    """
+    Κόβει το όνομα πριν από τυχόν 'όμιλο/group' (π.χ. 'Girone 2', '- Group A'),
+    ώστε αριθμοί ομίλων να μην μπερδεύονται με τον αριθμό κατηγορίας.
+    'Norway 3. Division - Girone 2' -> 'Norway 3. Division'
+    """
+    for sep in (" - ", " – ", " — "):
+        if sep in name:
+            return name.split(sep)[0]
+    return name
+
+
 def _is_tier2(name: str) -> bool:
-    name_l = name.lower()
+    name_l = _main_segment(name).lower().strip()
     return any(re.search(p, name_l) for p in TIER2_PATTERNS)
+
+
+def _is_tier3_plus(name: str) -> bool:
+    name_l = _main_segment(name).lower().strip()
+    return any(re.search(p, name_l) for p in TIER3_PLUS_PATTERNS)
 
 
 def _is_cup(league_entry) -> bool:
@@ -150,7 +181,12 @@ def classify_leagues():
                 result["domestic_cups"].append(league_id)
             continue
 
-        # Domestic league -- tier 1 ή tier 2
+        # Domestic league -- tier 1 ή tier 2. Ρητά αποκλείουμε tier3+ ΠΡΩΤΑ,
+        # πριν καν ελέγξουμε tier2 (ώστε π.χ. "2. divisjon" Νορβηγίας να μην
+        # περάσει ποτέ ως tier2 απλά και μόνο επειδή περιέχει το "2").
+        if _is_tier3_plus(name_l):
+            continue
+
         if in_explicit_list:
             if not _is_tier2(name_l):
                 result["tier1"].append(league_id)
