@@ -34,16 +34,17 @@ PREMATCH_WINDOW_HOURS = 1
 # ── Στατιστικά κριτήρια ──────────────────────────────────────────
 MIN_SAMPLE_SIZE = 6            # ελάχιστος αριθμός πρόσφατων αγώνων ανά ομάδα για αξιόπιστη ανάλυση
 VALUE_EDGE_THRESHOLD = 0.05    # ελάχιστο edge (5%) ώστε μια μονή επιλογή να θεωρείται "ευκαιρία"
+MIN_MODEL_PROBABILITY = 0.70   # ελάχιστη εκτίμηση σιγουριάς -- ισχύει ΠΑΝΤΟΥ, σε κάθε market/κανάλι
 
-BET_BUILDER_MIN_LEG_PROB = 0.60   # ελάχιστη εκτίμηση ανά επιλογή στο Bet Builder
+BET_BUILDER_MIN_LEG_PROB = 0.70   # ελάχιστη εκτίμηση ανά επιλογή στο Bet Builder
 BET_BUILDER_MIN_LEGS = 2
 BET_BUILDER_MAX_LEGS = 3
 BET_BUILDER_CORRELATION_PENALTY = 0.90   # πολλαπλασιαστής ανά επιπλέον leg (συντηρητική προσαρμογή)
-BET_BUILDER_MIN_COMBINED_PROB = 0.40     # ελάχιστο τελικό συνδυασμένο ποσοστό για να σταλεί
+BET_BUILDER_MIN_COMBINED_PROB = 0.70     # ελάχιστο τελικό συνδυασμένο ποσοστό για να σταλεί
 
 PARLAY_MIN_LEGS = 2
 PARLAY_MAX_LEGS = 3
-PARLAY_MIN_COMBINED_PROB = 0.50   # ελάχιστη συνολική εκτίμηση για να σταλεί το Παρολί
+PARLAY_MIN_COMBINED_PROB = 0.70   # ελάχιστη συνολική εκτίμηση για να σταλεί το Παρολί
 
 # Πόσους πρόσφατους αγώνες τραβάμε ανά ομάδα για τη στατιστική βάση
 RECENT_FIXTURES_LOOKBACK = 10
