@@ -343,22 +343,29 @@ def run_prematch_check():
         if not predictions:
             continue
 
-        # ── Μονά (1 μόνο μήνυμα/αγώνα -- η γραμμή με το μεγαλύτερο edge) ──
-        best_single = max(predictions, key=lambda p: p.edge or 0)
-        if not sent_tracker.already_sent("singles", fx["id"], "any"):
-            text = telegram_sender.format_single(
-                fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
-                best_single.market, best_single.model_prob, best_single.odds,
-                best_single.edge, best_single.basis, best_single.source,
-            )
-            if telegram_sender.send_message("singles", text):
-                sent_tracker.mark_sent("singles", fx["id"], "any")
-                results_tracker.add_pending(
-                    "singles",
-                    f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best_single.market}",
-                    [{"fixture_id": fx["id"], "market": best_single.market, "player_id": best_single.player_id}],
+        # ── Μονά (1 μόνο μήνυμα/αγώνα -- η γραμμή με το μεγαλύτερο edge,
+        #    μέσα στα όρια πιθανότητας/απόδοσης του καναλιού) ──
+        singles_candidates = [
+            p for p in predictions
+            if p.model_prob >= config.SINGLES_MIN_PROB
+            and config.SINGLES_ODDS_MIN <= p.odds <= config.SINGLES_ODDS_MAX
+        ]
+        if singles_candidates:
+            best_single = max(singles_candidates, key=lambda p: p.edge or 0)
+            if not sent_tracker.already_sent("singles", fx["id"], "any"):
+                text = telegram_sender.format_single(
+                    fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
+                    best_single.market, best_single.model_prob, best_single.odds,
+                    best_single.edge, best_single.basis, best_single.source,
                 )
-                logger.info("Μονό στάλθηκε: %s %s vs %s", best_single.market, fx["home_name"], fx["away_name"])
+                if telegram_sender.send_message("singles", text):
+                    sent_tracker.mark_sent("singles", fx["id"], "any")
+                    results_tracker.add_pending(
+                        "singles",
+                        f"{fx['league_name']}\n{fx['home_name']} vs {fx['away_name']} — {best_single.market}",
+                        [{"fixture_id": fx["id"], "market": best_single.market, "player_id": best_single.player_id}],
+                    )
+                    logger.info("Μονό στάλθηκε: %s %s vs %s", best_single.market, fx["home_name"], fx["away_name"])
 
         # συλλογή για Παρολί (pool, ξεχωριστά ανά αγώνα)
         for pred in predictions:
@@ -381,6 +388,7 @@ def run_prematch_check():
             combined_prob, fair_odds = analysis.combine_bet_builder(legs)
             key = tuple(sorted(p.market for p in legs))
             if combined_prob >= config.BET_BUILDER_MIN_COMBINED_PROB and \
+               config.BET_BUILDER_ODDS_MIN <= fair_odds <= config.BET_BUILDER_ODDS_MAX and \
                not sent_tracker.already_sent("bet_builder", fx["id"], key):
                 legs_desc = [f"{p.market} — εκτίμηση {p.model_prob*100:.0f}% ({p.source})" for p in legs]
                 text = telegram_sender.format_bet_builder(
@@ -433,10 +441,11 @@ def run_parlay_from_pool(parlay_pool, fixture_ids_in_window):
     combined_prob, combined_odds = analysis.combine_parlay(legs)
 
     if combined_prob < config.PARLAY_MIN_COMBINED_PROB:
-        return  # δεν φτάνει το ελάχιστο 50% -- δεν στέλνουμε
+        return  # δεν φτάνει το ελάχιστο 60% -- δεν στέλνουμε
+    if not (config.PARLAY_COMBINED_ODDS_MIN <= combined_odds <= config.PARLAY_COMBINED_ODDS_MAX):
+        return  # εκτός του επιθυμητού εύρους απόδοσης
 
     combined_edge = combined_prob - (1 / combined_odds if combined_odds else 1)
-
     legs_desc = [
         f"{fx['league_name']}: {fx['home_name']} vs {fx['away_name']} — {pred.market} ({pred.odds:.2f}, {pred.source})"
         for fx, _, pred in combo
@@ -485,8 +494,18 @@ def run_live_check():
             stats["no_predictions"] += 1
             continue
 
-        # 1 μόνο μήνυμα ανά αγώνα -- η γραμμή με το μεγαλύτερο edge
-        best = max(predictions, key=lambda p: p.edge or 0)
+        # 1 μόνο μήνυμα ανά αγώνα -- η γραμμή με το μεγαλύτερο edge,
+        # μέσα στα όρια πιθανότητας/απόδοσης του καναλιού Live
+        live_candidates = [
+            p for p in predictions
+            if p.model_prob >= config.LIVE_MIN_PROB
+            and config.LIVE_ODDS_MIN <= p.odds <= config.LIVE_ODDS_MAX
+        ]
+        if not live_candidates:
+            stats["no_predictions"] += 1
+            continue
+
+        best = max(live_candidates, key=lambda p: p.edge or 0)
 
         if sent_tracker.already_sent("live", fx["id"], "any"):
             stats["already_sent"] += 1
@@ -769,6 +788,8 @@ def _run_basketball_parlay(all_predictions):
         combined_odds *= pred.odds
 
     if combined_prob < config.PARLAY_MIN_COMBINED_PROB:
+        return
+    if not (config.PARLAY_COMBINED_ODDS_MIN <= combined_odds <= config.PARLAY_COMBINED_ODDS_MAX):
         return
 
     combined_edge = combined_prob - (1 / combined_odds if combined_odds else 1)

@@ -34,17 +34,32 @@ PREMATCH_WINDOW_HOURS = 1
 # ── Στατιστικά κριτήρια ──────────────────────────────────────────
 MIN_SAMPLE_SIZE = 6            # ελάχιστος αριθμός πρόσφατων αγώνων ανά ομάδα για αξιόπιστη ανάλυση
 VALUE_EDGE_THRESHOLD = 0.05    # ελάχιστο edge (5%) ώστε μια μονή επιλογή να θεωρείται "ευκαιρία"
-MIN_MODEL_PROBABILITY = 0.70   # ελάχιστη εκτίμηση σιγουριάς -- ισχύει ΠΑΝΤΟΥ, σε κάθε market/κανάλι
+MIN_MODEL_PROBABILITY = 0.50   # καθολικό ελάχιστο (το χαμηλότερο απ' όλα τα κανάλια) -- τα ειδικά όρια ανά κανάλι εφαρμόζονται ξεχωριστά παρακάτω
 
-BET_BUILDER_MIN_LEG_PROB = 0.70   # ελάχιστη εκτίμηση ανά επιλογή στο Bet Builder
+# ── Όρια ΑΝΑ ΚΑΝΑΛΙ (πιθανότητα + εύρος απόδοσης) ────────────────
+SINGLES_MIN_PROB = 0.60
+SINGLES_ODDS_MIN = 1.30
+SINGLES_ODDS_MAX = 3.50
+
+LIVE_MIN_PROB = 0.60
+LIVE_ODDS_MIN = 1.30
+LIVE_ODDS_MAX = 5.00
+
+PARLAY_COMBINED_ODDS_MIN = 2.00
+PARLAY_COMBINED_ODDS_MAX = 7.00
+
+BET_BUILDER_ODDS_MIN = 2.50
+BET_BUILDER_ODDS_MAX = 10.00
+
+BET_BUILDER_MIN_LEG_PROB = 0.55   # ελάχιστη εκτίμηση ανά επιλογή στο Bet Builder
 BET_BUILDER_MIN_LEGS = 2
 BET_BUILDER_MAX_LEGS = 3
 BET_BUILDER_CORRELATION_PENALTY = 0.90   # πολλαπλασιαστής ανά επιπλέον leg (συντηρητική προσαρμογή)
-BET_BUILDER_MIN_COMBINED_PROB = 0.70     # ελάχιστο τελικό συνδυασμένο ποσοστό για να σταλεί
+BET_BUILDER_MIN_COMBINED_PROB = 0.50     # ελάχιστο τελικό συνδυασμένο ποσοστό για να σταλεί
 
 PARLAY_MIN_LEGS = 2
 PARLAY_MAX_LEGS = 3
-PARLAY_MIN_COMBINED_PROB = 0.70   # ελάχιστη συνολική εκτίμηση για να σταλεί το Παρολί
+PARLAY_MIN_COMBINED_PROB = 0.60   # ελάχιστη συνολική εκτίμηση για να σταλεί το Παρολί
 
 # Πόσους πρόσφατους αγώνες τραβάμε ανά ομάδα για τη στατιστική βάση
 RECENT_FIXTURES_LOOKBACK = 10
