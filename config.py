@@ -55,11 +55,11 @@ BET_BUILDER_MIN_LEG_PROB = 0.55   # ελάχιστη εκτίμηση ανά ε�
 BET_BUILDER_MIN_LEGS = 2
 BET_BUILDER_MAX_LEGS = 3
 BET_BUILDER_CORRELATION_PENALTY = 0.90   # πολλαπλασιαστής ανά επιπλέον leg (συντηρητική προσαρμογή)
-BET_BUILDER_MIN_COMBINED_PROB = 0.50     # ελάχιστο τελικό συνδυασμένο ποσοστό για να σταλεί
+BET_BUILDER_MIN_COMBINED_PROB = 0.10     # χαμηλό επίτηδες -- ο πραγματικός φύλακας είναι το εύρος απόδοσης (BET_BUILDER_ODDS_MIN/MAX), αφού odds = 1/prob
 
 PARLAY_MIN_LEGS = 2
 PARLAY_MAX_LEGS = 3
-PARLAY_MIN_COMBINED_PROB = 0.60   # ελάχιστη συνολική εκτίμηση για να σταλεί το Παρολί
+PARLAY_MIN_COMBINED_PROB = 0.48   # ελάχιστη συνολική εκτίμηση για να σταλεί το Παρολί
 
 # Πόσους πρόσφατους αγώνες τραβάμε ανά ομάδα για τη στατιστική βάση
 RECENT_FIXTURES_LOOKBACK = 10
