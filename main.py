@@ -67,6 +67,15 @@ def startup():
     except Exception:
         logger.exception("Δεν κατάφερα να τραβήξω τη λίστα bookmakers")
 
+    # Καταγράφουμε ΚΑΙ όλα τα πραγματικά ονόματα markets (bet types) -- ώστε να
+    # ξέρουμε ΣΙΓΟΥΡΑ πώς τα ονομάζει το API, αντί να μαντεύουμε (DNB, Η/Τ κλπ.)
+    try:
+        bet_types = api_football.get_bet_types()
+        bt_names = sorted(b["name"] for b in bet_types if b.get("name"))
+        logger.info("Διαθέσιμα markets/bet types (%s): %s", len(bt_names), ", ".join(bt_names))
+    except Exception:
+        logger.exception("Δεν κατάφερα να τραβήξω τη λίστα bet types")
+
 
 def _fixture_basics(fixture):
     country = fixture["league"].get("country") or ""
