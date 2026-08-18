@@ -122,8 +122,13 @@ def parse_cards_odds(fixture_odds_response):
     return _parse_over_under_category(fixture_odds_response, "card", "Cards")
 
 
-ANYTIME_SCORER_BET_NAMES = {"anytime goalscorer", "goalscorer anytime", "to score anytime", "player to score"}
-FIRST_SCORER_BET_NAMES = {"first goalscorer", "first player to score"}
+ANYTIME_SCORER_BET_NAMES = {
+    "anytime goalscorer", "anytime goal scorer", "goalscorer anytime",
+    "to score anytime", "player to score",
+}
+FIRST_SCORER_BET_NAMES = {
+    "first goalscorer", "first goal scorer", "first player to score",
+}
 
 
 def parse_scorer_odds_raw(fixture_odds_response, bet_names):
@@ -221,7 +226,7 @@ DNB_BET_NAMES = {"draw no bet"}
 DOUBLE_CHANCE_BET_NAMES = {"double chance"}
 HTFT_BET_NAMES = {
     "ht/ft", "half time/full time", "halftime/fulltime",
-    "half-time/full-time", "1st half/2nd half", "ht-ft",
+    "half-time/full-time", "1st half/2nd half", "ht-ft", "ht/ft double",
 }
 CORRECT_SCORE_BET_NAMES = {"exact score", "correct score"}
 ASIAN_HANDICAP_BET_NAMES = {"asian handicap"}
@@ -230,15 +235,39 @@ CLEAN_SHEET_BET_NAMES = {"clean sheet - home", "clean sheet - away", "clean shee
 
 
 def parse_dnb_odds(raw):
-    collected = _collect_values(raw, DNB_BET_NAMES)
+    """
+    ΔΕΝ υπάρχει ενιαίο market "Draw No Bet" στο API -- είναι 2 ΞΕΧΩΡΙΣΤΑ
+    bet types: "Home No Bet" και "Away No Bet" (επιβεβαιωμένο από πραγματικά
+    δεδομένα). Κάθε ένα έχει συνήθως 1 σχετική τιμή (π.χ. "Yes" ή το ίδιο
+    το όνομα ομάδας) -- παίρνουμε την ΟΠΟΙΑΔΗΠΟΤΕ διαθέσιμη τιμή.
+    """
     result = {}
-    label_map = {"home": "DNB Home", "away": "DNB Away"}
-    for label, entries in collected.items():
-        key = label_map.get(label.lower())
-        if key:
-            picked = _pick_odds(entries)
-            if picked:
-                result[key] = picked
+    if not raw:
+        return result
+    bookmakers = raw.get("bookmakers", [])
+    collected = {"Home": [], "Away": []}
+    for bm in bookmakers:
+        bm_name = bm.get("name", "")
+        for bet in bm.get("bets", []):
+            bet_name_l = bet.get("name", "").lower().strip()
+            side = None
+            if bet_name_l == "home no bet":
+                side = "Home"
+            elif bet_name_l == "away no bet":
+                side = "Away"
+            if not side:
+                continue
+            for val in bet.get("values", []):
+                try:
+                    odd = float(val.get("odd"))
+                except (TypeError, ValueError):
+                    continue
+                collected[side].append((odd, bm_name))
+
+    for side, entries in collected.items():
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"DNB {side}"] = picked
     return result
 
 
@@ -314,6 +343,8 @@ def parse_team_goals_odds(raw):
             bet_name_l = bet.get("name", "").lower()
             if "team" not in bet_name_l or "total" not in bet_name_l:
                 continue
+            if "half" in bet_name_l:
+                continue  # αποφεύγουμε ημιχρονικές εκδοχές -- θέλουμε μόνο ολόκληρο τον αγώνα
             side = "Home" if "home" in bet_name_l else ("Away" if "away" in bet_name_l else None)
             if not side:
                 continue
@@ -369,9 +400,10 @@ def parse_clean_sheet_odds(raw):
 
 def parse_multi_goals_odds(raw):
     """
-    Σύνολο γκολ σε εύρος (π.χ. 'Multi Goals' market: '2-3', '4-6' κλπ).
-    Δεν είμαστε 100% σίγουροι για το ακριβές όνομα bet type στο API-Football --
-    matching με keyword "goal" στο όνομα ΚΑΙ label της μορφής "N-M".
+    Σύνολο γκολ σε εύρος. Επιβεβαιωμένο πραγματικό όνομα από το API:
+    "Number of Goals In Match (Range)" (και πιθανώς "Total Goals Number By Ranges").
+    Matching με keyword "goal" στο όνομα ΚΑΙ label της μορφής "N-M" -- πιάνει
+    και τα δύο αυτόματα, χωρίς να χρειάζεται λίστα ακριβών ονομάτων.
     """
     import re
     result = {}
