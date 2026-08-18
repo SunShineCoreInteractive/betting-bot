@@ -229,6 +229,49 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
     return predictions
 
 
+def _combo_bets_family(market):
+    """Απλή ομαδοποίηση ώστε να μη συνδυάζουμε δύο σχεδόν-ίδιες επιλογές (π.χ. Over 1.5 + Over 2.5)."""
+    return _market_family_label(market)
+
+
+def _try_combo_bet(fx, kickoff_str, all_predictions):
+    """
+    Διαλέγει τον καλύτερο συνδυασμό 2 markets ΙΔΙΟΥ αγώνα (π.χ. '1Χ & Over 2.5'),
+    με προσαρμογή συσχέτισης, και τον επιστρέφει ως Prediction-like tuple
+    (legs, combined_prob, fair_odds) -- ή None αν δεν βρεθεί αρκετά καλός συνδυασμός.
+    """
+    eligible = [p for p in all_predictions if p.model_prob >= config.COMBO_BETS_MIN_LEG_PROB]
+    if len(eligible) < config.COMBO_BETS_MIN_LEGS:
+        return None
+
+    # 1 επιλογή ανά "οικογένεια" market -- αποφεύγουμε π.χ. δύο διαφορετικές Over γραμμές μαζί
+    best_per_family = {}
+    for p in eligible:
+        family = _combo_bets_family(p.market)
+        if family not in best_per_family or p.model_prob > best_per_family[family].model_prob:
+            best_per_family[family] = p
+
+    candidates = sorted(best_per_family.values(), key=lambda p: -(p.edge or 0))
+    if len(candidates) < config.COMBO_BETS_MIN_LEGS:
+        return None
+
+    legs = candidates[:config.COMBO_BETS_MAX_LEGS]
+
+    combined_prob = 1.0
+    for i, leg in enumerate(legs):
+        penalty = config.COMBO_BETS_CORRELATION_PENALTY ** i
+        combined_prob *= leg.model_prob * penalty
+
+    if combined_prob < config.COMBO_BETS_MIN_COMBINED_PROB:
+        return None
+
+    fair_odds = 1 / combined_prob if combined_prob > 0 else None
+    if fair_odds is None or fair_odds < config.MIN_ODDS:
+        return None
+
+    return legs, combined_prob, fair_odds
+
+
 def _analyze_scorers(fx, lam_home, lam_away, odds_response):
     """
     Προϋποθέτει διαθέσιμο line-up (συνήθως ~1 ώρα πριν την έναρξη -- ταιριάζει
@@ -432,6 +475,30 @@ def run_market_check():
                     channel_key, pred.market, fx["home_name"], fx["away_name"],
                     pred.model_prob * 100, pred.odds,
                 )
+
+        # Combo Bets -- 2 markets ίδιου αγώνα μαζί
+        combo_result = _try_combo_bet(fx, kickoff_str, predictions)
+        if combo_result:
+            legs, combined_prob, fair_odds = combo_result
+            combo_key = tuple(sorted(leg.market for leg in legs))
+            if not sent_tracker.already_sent("combo_bets", fx["id"], combo_key):
+                legs_desc = [f"{leg.market} — εκτίμηση {leg.model_prob*100:.0f}%" for leg in legs]
+                text = telegram_sender.format_combo_bets(
+                    fx["league_name"], fx["home_name"], fx["away_name"], kickoff_str,
+                    legs_desc, combined_prob, fair_odds,
+                )
+                message_id = telegram_sender.send_message("combo_bets", text)
+                if message_id:
+                    sent_tracker.mark_sent("combo_bets", fx["id"], combo_key)
+                    results_tracker.add_pending(
+                        "combo_bets", message_id, text,
+                        [{"fixture_id": fx["id"], "market": leg.market, "player_id": leg.player_id} for leg in legs],
+                    )
+                    sent_counts["combo_bets"] = sent_counts.get("combo_bets", 0) + 1
+                    logger.info(
+                        "Στάλθηκε [combo_bets] %s vs %s: %s",
+                        fx["home_name"], fx["away_name"], " + ".join(leg.market for leg in legs),
+                    )
 
     logger.info(
         "Διαγνωστικό markets (ΠΡΙΝ το φίλτρο) -- %s",
