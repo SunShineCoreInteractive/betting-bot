@@ -22,7 +22,12 @@ def send_message(channel_key, text):
     if not chat_id:
         logger.error("Άγνωστο κανάλι: %s", channel_key)
         return None
+    return send_to_chat_id(chat_id, text)
 
+
+def send_to_chat_id(chat_id, text):
+    """Στέλνει απευθείας σε συγκεκριμένο chat_id -- για κανάλια εκτός του
+    BET_TYPE_CHANNELS (π.χ. το κανάλι Απολογισμού)."""
     url = f"{config.TELEGRAM_API_BASE}/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -35,7 +40,7 @@ def send_message(channel_key, text):
         resp.raise_for_status()
         return resp.json().get("result", {}).get("message_id")
     except requests.RequestException as e:
-        logger.error("Αποτυχία αποστολής στο %s: %s", channel_key, e)
+        logger.error("Αποτυχία αποστολής στο chat_id %s: %s", chat_id, e)
         return None
 
 
@@ -102,3 +107,38 @@ def format_combo_bets(league_name, home, away, kickoff_str, legs_desc, combined_
         f"⚠️ Μοντέλο βάσει ιστορικών στατιστικών — δεν συγκρίνεται με τιμή "
         f"bookmaker bet builder (δεν διατίθεται μέσω API)"
     )
+
+
+def format_stats_summary(period_hours, by_channel):
+    """
+    period_hours: πόσες ώρες καλύπτει ο απολογισμός
+    by_channel: dict {channel_key: {"won": int, "lost": int}}
+    """
+    total_won = sum(v["won"] for v in by_channel.values())
+    total_lost = sum(v["lost"] for v in by_channel.values())
+    total = total_won + total_lost
+
+    if total == 0:
+        return (
+            f"📊 <b>Απολογισμός (τελευταίες {period_hours} ώρες)</b>\n\n"
+            f"Καμία πρόβλεψη δεν ολοκληρώθηκε σε αυτό το διάστημα."
+        )
+
+    win_rate = (total_won / total) * 100
+
+    lines = [f"📊 <b>Απολογισμός (τελευταίες {period_hours} ώρες)</b>\n"]
+    lines.append(f"Σύνολο προβλέψεων: {total}")
+    lines.append(f"✅ Κερδισμένες: {total_won} ({win_rate:.1f}%)")
+    lines.append(f"❌ Χαμένες: {total_lost} ({100-win_rate:.1f}%)")
+    lines.append("")
+    lines.append("<b>Ανά κανάλι:</b>")
+
+    for channel_key, counts in sorted(by_channel.items()):
+        ch_total = counts["won"] + counts["lost"]
+        if ch_total == 0:
+            continue
+        ch_rate = (counts["won"] / ch_total) * 100
+        display_name = config.CHANNEL_DISPLAY_NAMES.get(channel_key, channel_key)
+        lines.append(f"{display_name}: {counts['won']}/{ch_total} ({ch_rate:.0f}%)")
+
+    return "\n".join(lines)

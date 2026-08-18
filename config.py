@@ -61,7 +61,7 @@ MARKET_FAMILY_TO_CHANNEL = {
 # Κάθε τόσες ώρες ελέγχουμε ΤΟ ΙΔΙΟ διάστημα ωρών μπροστά (κυλιόμενο παράθυρο).
 # π.χ. αν τρέξει 09:00, καλύπτει αγώνες 09:00-12:00. Επόμενος έλεγχος στις 12:00,
 # καλύπτει 12:00-15:00. Άρα το παράθυρο = το ίδιο νούμερο με το interval.
-MARKET_CHECK_INTERVAL_HOURS = 3
+MARKET_CHECK_INTERVAL_HOURS = 1
 RESULTS_CHECK_INTERVAL_MIN = 5   # πόσο συχνά ελέγχουμε αν τελείωσαν αγώνες, για επεξεργασία emoji
 
 # ── Στατιστικά κριτήρια ──────────────────────────────────────────
@@ -79,6 +79,25 @@ MIN_ODDS = 1.20
 # ── Μόνιμη αποθήκευση (Render Disk) -- ώστε οι εκκρεμείς προβλέψεις προς
 # έλεγχο αποτελέσματος να ΕΠΙΒΙΩΝΟΥΝ σε κάθε redeploy, όχι να χάνονται.
 PERSISTENT_DATA_DIR = os.environ.get("PERSISTENT_DATA_DIR", "/var/data")
+
+# ── Κανάλι Απολογισμού (Statistics Bet) ──────────────────────────
+STATS_CHANNEL_ID = -1004337725059
+STATS_SUMMARY_INTERVAL_HOURS = 12   # στέλνει απολογισμό 2 φορές/μέρα -- άλλαξέ το αν θες αλλιώς
+
+CHANNEL_DISPLAY_NAMES = {
+    "1x2": "1-Χ-2",
+    "gg_ng": "G/G & N/G",
+    "ou": "O/U Τερμάτων",
+    "double_chance": "Διπλή Ευκαιρία",
+    "dnb": "Draw No Bet",
+    "combo_bets": "Combo Bets",
+    "eidika_hmixrono": "Η/Τ & Ακριβές Σκορ",
+    "multi_goals": "Σύνολο Γκολ",
+    "asian_handicap": "Ασιατικό Χάντικαπ",
+    "eidika_omadon": "Ειδικά Ομάδων",
+    "eidika_paikton": "Σκόρερ",
+    "stats_agona": "Στατιστικά Αγώνα",
+}
 
 # Πόσους πρόσφατους αγώνες τραβάμε ανά ομάδα για τη στατιστική βάση
 RECENT_FIXTURES_LOOKBACK = 10

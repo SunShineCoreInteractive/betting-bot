@@ -9,6 +9,7 @@
 "μέσος όρος αγοράς" (όχι συγκεκριμένη στοιχηματική).
 """
 
+import re
 import statistics
 
 import config
@@ -37,7 +38,9 @@ def _collect_values(fixture_odds_response, target_bet_names):
     for bm in bookmakers:
         bm_name = bm.get("name", "")
         for bet in bm.get("bets", []):
-            bet_name_l = bet.get("name", "").lower()
+            # Κανονικοποίηση -- αφαιρούμε κενά γύρω από "/" (π.χ. "Half Time / Full Time"
+            # -> "half time/full time") ώστε να μην χάνουμε ταίριασμα λόγω format
+            bet_name_l = re.sub(r"\s*/\s*", "/", bet.get("name", "").lower().strip())
             if bet_name_l not in target_bet_names:
                 continue
             for val in bet.get("values", []):
@@ -216,7 +219,10 @@ def parse_all_odds(fixture_odds_response):
 
 DNB_BET_NAMES = {"draw no bet"}
 DOUBLE_CHANCE_BET_NAMES = {"double chance"}
-HTFT_BET_NAMES = {"ht/ft", "half time/full time", "halftime/fulltime"}
+HTFT_BET_NAMES = {
+    "ht/ft", "half time/full time", "halftime/fulltime",
+    "half-time/full-time", "1st half/2nd half", "ht-ft",
+}
 CORRECT_SCORE_BET_NAMES = {"exact score", "correct score"}
 ASIAN_HANDICAP_BET_NAMES = {"asian handicap"}
 TEAM_GOALS_BET_NAMES = {"home team total goals", "away team total goals", "team total goals"}

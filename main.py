@@ -25,6 +25,7 @@ import telegram_sender
 import sent_tracker
 import results_tracker
 import scorer_matcher
+import stats_tracker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +43,7 @@ def startup():
     # Φορτώνουμε τις εκκρεμείς προβλέψεις από τον μόνιμο δίσκο ΠΡΩΤΑ απ' όλα
     # (τώρα που το logging λειτουργεί ήδη κανονικά, ώστε να φαίνεται το log)
     results_tracker.load()
+    stats_tracker.load()
 
     logger.info("Ταξινόμηση λιγκών (μία φορά, cache 1 εβδομάδα)...")
     classification = league_classifier.classify_leagues()
@@ -658,9 +660,18 @@ def check_results():
                     "Αποτέλεσμα ενημερώθηκε (%s) στο κανάλι %s (msg %s)",
                     result_label, entry["channel"], entry["message_id"],
                 )
+                if overall_result != "PUSH":  # το PUSH δεν μετράει ούτε ως κέρδος ούτε ως χάσιμο
+                    stats_tracker.record_result(entry["channel"], overall_result)
 
     results_tracker.save()  # αποθηκεύουμε ΟΠΟΙΑΔΗΠΟΤΕ πρόοδο (ακόμα και μερικά αποτελέσματα legs)
     results_tracker.cleanup_stale()
+
+
+def run_stats_summary():
+    snapshot = stats_tracker.get_and_reset_summary()
+    text = telegram_sender.format_stats_summary(config.STATS_SUMMARY_INTERVAL_HOURS, snapshot["by_channel"])
+    telegram_sender.send_to_chat_id(config.STATS_CHANNEL_ID, text)
+    logger.info("Απολογισμός στάλθηκε στο κανάλι Statistics Bet")
 
 
 # ── Scheduler loop ────────────────────────────────────────────
@@ -670,6 +681,7 @@ def main_loop():
 
     last_market_run = 0
     last_results_run = 0
+    last_stats_summary_run = 0
 
     while True:
         now = time.time()
@@ -687,6 +699,13 @@ def main_loop():
             except Exception:
                 logger.exception("Σφάλμα στον έλεγχο αποτελεσμάτων")
             last_results_run = now
+
+        if now - last_stats_summary_run >= config.STATS_SUMMARY_INTERVAL_HOURS * 3600:
+            try:
+                run_stats_summary()
+            except Exception:
+                logger.exception("Σφάλμα στον απολογισμό στατιστικών")
+            last_stats_summary_run = now
 
         logger.info("API calls σήμερα μέχρι στιγμής: %s", api_football.get_daily_call_count())
         time.sleep(30)
