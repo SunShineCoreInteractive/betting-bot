@@ -153,11 +153,13 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
 
     predictions = []
 
-    def _try_add(market_name, model_prob, basis):
+    def _try_add(market_name, model_prob, basis, min_prob=None, edge_threshold=None):
         odds_info = odds_lookup.get(market_name)
         if not odds_info:
             return
-        ok, edge = analysis.is_value_bet(model_prob, odds_info["odds"])
+        ok, edge = analysis.is_value_bet(
+            model_prob, odds_info["odds"], threshold=edge_threshold, min_prob=min_prob
+        )
         if ok:
             predictions.append(analysis.Prediction(
                 market=market_name, model_prob=model_prob, odds=odds_info["odds"],
@@ -179,12 +181,19 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
     # HT/FT
     htft_probs = analysis.prob_ht_ft(lam_home, lam_away)
     for label, p in htft_probs.items():
-        _try_add(f"HT/FT: {label}", p, f"Απλοποιημένο μοντέλο (χωρίς συσχέτιση ημιχρόνων), xG {lam_home:.2f}/{lam_away:.2f}")
+        _try_add(
+            f"HT/FT: {label}", p,
+            f"Απλοποιημένο μοντέλο (χωρίς συσχέτιση ημιχρόνων), xG {lam_home:.2f}/{lam_away:.2f}",
+            min_prob=config.HTFT_MIN_PROB, edge_threshold=config.HTFT_MIN_EDGE,
+        )
 
     # Correct Score
     cs_probs = analysis.prob_correct_score(lam_home, lam_away)
     for label, p in cs_probs.items():
-        _try_add(f"Correct Score: {label}", p, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+        _try_add(
+            f"Correct Score: {label}", p, f"xG home {lam_home:.2f} / away {lam_away:.2f}",
+            min_prob=config.CORRECT_SCORE_MIN_PROB, edge_threshold=config.CORRECT_SCORE_MIN_EDGE,
+        )
 
     # Multi Goals (εύρος)
     for market_name in list(odds_lookup.keys()):

@@ -184,10 +184,11 @@ def calculate_edge(model_prob, decimal_odds):
     return model_prob - implied
 
 
-def is_value_bet(model_prob, decimal_odds, threshold=None):
+def is_value_bet(model_prob, decimal_odds, threshold=None, min_prob=None):
     threshold = threshold if threshold is not None else config.VALUE_EDGE_THRESHOLD
-    if model_prob < config.MIN_MODEL_PROBABILITY:
-        return False, None  # κάτω από το καθολικό ελάχιστο σιγουριάς -- δεν στέλνεται, ό,τι edge κι αν έχει
+    min_prob = min_prob if min_prob is not None else config.MIN_MODEL_PROBABILITY
+    if model_prob < min_prob:
+        return False, None  # κάτω από το ελάχιστο σιγουριάς -- δεν στέλνεται, ό,τι edge κι αν έχει
     edge = calculate_edge(model_prob, decimal_odds)
     return edge is not None and edge >= threshold, edge
 
