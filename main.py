@@ -205,7 +205,10 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
             except (IndexError, ValueError):
                 continue
 
-    # Ασιατικό Χάντικαπ
+    # Ασιατικό Χάντικαπ -- ΜΟΝΟ η καλύτερη γραμμή ανά ΠΛΕΥΡΑ (Home/Away), όχι όλες
+    # μαζί (αλλιώς "πλημμυρίζει" το κανάλι με 6-8 σχεδόν-ίδιες επιλογές για τον
+    # ίδιο αγώνα και το Telegram μπλοκάρει το bot με 429 rate limit)
+    ah_candidates = {"Home": [], "Away": []}
     for market_name in list(odds_lookup.keys()):
         if market_name.startswith("Asian Handicap"):
             try:
@@ -216,20 +219,51 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
                     p = analysis.prob_handicap_home(handicap, lam_home, lam_away)
                 else:
                     p = analysis.prob_handicap_home(-handicap, lam_away, lam_home)
-                _try_add(market_name, p, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+                ah_candidates[side].append((market_name, p))
             except (IndexError, ValueError):
                 continue
 
-    # Ειδικά Ομάδων -- Over γκολ συγκεκριμένης ομάδας
+    for side, candidates in ah_candidates.items():
+        if not candidates:
+            continue
+        # Διαλέγουμε τη γραμμή με το μεγαλύτερο edge (όχι απλά την πρώτη)
+        best_market, best_p = None, None
+        best_edge = -1
+        for market_name, p in candidates:
+            odds_info = odds_lookup.get(market_name)
+            if not odds_info:
+                continue
+            edge = analysis.calculate_edge(p, odds_info["odds"])
+            if edge is not None and edge > best_edge:
+                best_edge, best_market, best_p = edge, market_name, p
+        if best_market:
+            _try_add(best_market, best_p, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+
+    # Ειδικά Ομάδων -- Over γκολ συγκεκριμένης ομάδας. ΜΟΝΟ η καλύτερη γραμμή
+    # ανά πλευρά (ίδιος λόγος με το Ασιατικό Χάντικαπ -- αποφυγή πλημμύρας)
+    team_goals_candidates = {"Home": [], "Away": []}
     for market_name in list(odds_lookup.keys()):
         if "Team Over" in market_name:
             try:
                 line = float(market_name.split()[3])  # "Home Team Over 1.5 Goals" -> index 3 = "1.5"
             except (IndexError, ValueError):
                 continue
-            team_lam = lam_home if market_name.startswith("Home") else lam_away
+            side = "Home" if market_name.startswith("Home") else "Away"
+            team_lam = lam_home if side == "Home" else lam_away
             p = analysis.prob_team_over(line, team_lam)
-            _try_add(market_name, p, f"Εκτιμώμενα γκολ ομάδας: {team_lam:.2f}")
+            team_goals_candidates[side].append((market_name, p, team_lam))
+
+    for side, candidates in team_goals_candidates.items():
+        best_market, best_p, best_lam, best_edge = None, None, None, -1
+        for market_name, p, team_lam in candidates:
+            odds_info = odds_lookup.get(market_name)
+            if not odds_info:
+                continue
+            edge = analysis.calculate_edge(p, odds_info["odds"])
+            if edge is not None and edge > best_edge:
+                best_edge, best_market, best_p, best_lam = edge, market_name, p, team_lam
+        if best_market:
+            _try_add(best_market, best_p, f"Εκτιμώμενα γκολ ομάδας: {best_lam:.2f}")
 
     # Ειδικά Ομάδων -- Clean Sheet
     _try_add("Home Clean Sheet", analysis.prob_clean_sheet(lam_away), f"Αντίπαλο xG: {lam_away:.2f}")
