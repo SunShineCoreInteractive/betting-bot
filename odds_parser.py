@@ -41,7 +41,7 @@ def _collect_values(fixture_odds_response, target_bet_names):
             if bet_name_l not in target_bet_names:
                 continue
             for val in bet.get("values", []):
-                label = val.get("value")
+                label = str(val.get("value") or "")  # ασφάλεια -- μερικά bookmakers δίνουν αριθμό αντί για κείμενο
                 try:
                     odd = float(val.get("odd"))
                 except (TypeError, ValueError):
@@ -94,7 +94,7 @@ def _parse_over_under_category(fixture_odds_response, name_keyword, category_lab
             if name_keyword not in bet_name_l:
                 continue
             for val in bet.get("values", []):
-                label = (val.get("value") or "")
+                label = str(val.get("value") or "")
                 if not (label.lower().startswith("over") or label.lower().startswith("under")):
                     continue  # ασφάλεια -- αγνόησε π.χ. team-based κάρτες markets
                 try:
@@ -141,7 +141,7 @@ def parse_scorer_odds_raw(fixture_odds_response, bet_names):
             if bet_name_l not in bet_names:
                 continue
             for val in bet.get("values", []):
-                label = val.get("value")
+                label = str(val.get("value") or "")  # ασφάλεια -- μερικά bookmakers δίνουν αριθμό αντί για κείμενο
                 try:
                     odd = float(val.get("odd"))
                 except (TypeError, ValueError):
@@ -312,7 +312,7 @@ def parse_team_goals_odds(raw):
             if not side:
                 continue
             for val in bet.get("values", []):
-                label = (val.get("value") or "")
+                label = str(val.get("value") or "")
                 if not label.lower().startswith("over"):
                     continue
                 try:
@@ -345,7 +345,7 @@ def parse_clean_sheet_odds(raw):
             if not side:
                 continue
             for val in bet.get("values", []):
-                label = (val.get("value") or "").lower()
+                label = str(val.get("value") or "").lower()
                 if label != "yes":
                     continue
                 try:
@@ -380,7 +380,7 @@ def parse_multi_goals_odds(raw):
             if "goal" not in bet_name_l or "over" in bet_name_l or "under" in bet_name_l:
                 continue  # αποφεύγουμε clash με Goals O/U
             for val in bet.get("values", []):
-                label = (val.get("value") or "").strip()
+                label = str(val.get("value") or "").strip()
                 if not re.fullmatch(r"\d+-\d+", label):
                     continue
                 try:
