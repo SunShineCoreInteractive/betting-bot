@@ -654,6 +654,7 @@ def check_results():
                     result_label, entry["channel"], entry["message_id"],
                 )
 
+    results_tracker.save()  # αποθηκεύουμε ΟΠΟΙΑΔΗΠΟΤΕ πρόοδο (ακόμα και μερικά αποτελέσματα legs)
     results_tracker.cleanup_stale()
 
 
