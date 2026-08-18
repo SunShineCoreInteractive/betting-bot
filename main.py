@@ -135,6 +135,97 @@ def _get_predictions_for_fixture(fx):
         except Exception:
             logger.exception("Σφάλμα ανάλυσης σκόρερ fixture %s", fx["id"])
 
+    # Κύμα 2 -- DNB, Διπλή Ευκαιρία, Η/Τ, Ακριβές Σκορ, Σύνολο Γκολ, Ασιατικό
+    # Χάντικαπ, Ειδικά Ομάδων (χρησιμοποιεί το ίδιο odds_response, καμία επιπλέον κλήση)
+    try:
+        predictions += _analyze_wave2_markets(fx, lam_home, lam_away, odds_response)
+    except Exception:
+        logger.exception("Σφάλμα ανάλυσης Κύματος 2 fixture %s", fx["id"])
+
+    return predictions
+
+
+def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
+    """DNB, Double Chance, HT/FT, Correct Score, Multi Goals, Asian Handicap, Ειδικά Ομάδων."""
+    odds_lookup = odds_parser.parse_wave2_odds(odds_response[0] if odds_response else {})
+    if not odds_lookup:
+        return []
+
+    predictions = []
+
+    def _try_add(market_name, model_prob, basis):
+        odds_info = odds_lookup.get(market_name)
+        if not odds_info:
+            return
+        ok, edge = analysis.is_value_bet(model_prob, odds_info["odds"])
+        if ok:
+            predictions.append(analysis.Prediction(
+                market=market_name, model_prob=model_prob, odds=odds_info["odds"],
+                implied_prob=analysis.implied_probability(odds_info["odds"]), edge=edge,
+                basis=basis, source=odds_info["source"],
+            ))
+
+    # DNB
+    p_dnb_h, p_dnb_a = analysis.prob_dnb(lam_home, lam_away)
+    _try_add("DNB Home", p_dnb_h, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+    _try_add("DNB Away", p_dnb_a, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+
+    # Double Chance
+    p_1x, p_x2, p_12 = analysis.prob_double_chance(lam_home, lam_away)
+    _try_add("Double Chance: 1X", p_1x, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+    _try_add("Double Chance: X2", p_x2, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+    _try_add("Double Chance: 12", p_12, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+
+    # HT/FT
+    htft_probs = analysis.prob_ht_ft(lam_home, lam_away)
+    for label, p in htft_probs.items():
+        _try_add(f"HT/FT: {label}", p, f"Απλοποιημένο μοντέλο (χωρίς συσχέτιση ημιχρόνων), xG {lam_home:.2f}/{lam_away:.2f}")
+
+    # Correct Score
+    cs_probs = analysis.prob_correct_score(lam_home, lam_away)
+    for label, p in cs_probs.items():
+        _try_add(f"Correct Score: {label}", p, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+
+    # Multi Goals (εύρος)
+    for market_name in list(odds_lookup.keys()):
+        if market_name.startswith("Multi Goals"):
+            try:
+                low, high = market_name.split(":")[1].strip().split("-")
+                p = analysis.prob_goals_in_range(int(low), int(high), lam_home, lam_away)
+                _try_add(market_name, p, f"Εκτιμώμενα γκολ αγώνα: {lam_home + lam_away:.2f}")
+            except (IndexError, ValueError):
+                continue
+
+    # Ασιατικό Χάντικαπ
+    for market_name in list(odds_lookup.keys()):
+        if market_name.startswith("Asian Handicap"):
+            try:
+                side_part, handicap_str = market_name.split(":")
+                handicap = float(handicap_str.strip())
+                side = "Home" if "Home" in side_part else "Away"
+                if side == "Home":
+                    p = analysis.prob_handicap_home(handicap, lam_home, lam_away)
+                else:
+                    p = analysis.prob_handicap_home(-handicap, lam_away, lam_home)
+                _try_add(market_name, p, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+            except (IndexError, ValueError):
+                continue
+
+    # Ειδικά Ομάδων -- Over γκολ συγκεκριμένης ομάδας
+    for market_name in list(odds_lookup.keys()):
+        if "Team Over" in market_name:
+            try:
+                line = float(market_name.split()[3])  # "Home Team Over 1.5 Goals" -> index 3 = "1.5"
+            except (IndexError, ValueError):
+                continue
+            team_lam = lam_home if market_name.startswith("Home") else lam_away
+            p = analysis.prob_team_over(line, team_lam)
+            _try_add(market_name, p, f"Εκτιμώμενα γκολ ομάδας: {team_lam:.2f}")
+
+    # Ειδικά Ομάδων -- Clean Sheet
+    _try_add("Home Clean Sheet", analysis.prob_clean_sheet(lam_away), f"Αντίπαλο xG: {lam_away:.2f}")
+    _try_add("Away Clean Sheet", analysis.prob_clean_sheet(lam_home), f"Αντίπαλο xG: {lam_home:.2f}")
+
     return predictions
 
 
@@ -251,6 +342,22 @@ def _market_family_label(market):
         return "Cards"
     if market.startswith("Anytime Goalscorer") or market.startswith("First Goalscorer"):
         return "Scorer"
+    if market.startswith("DNB"):
+        return "DNB"
+    if market.startswith("Double Chance"):
+        return "Double Chance"
+    if market.startswith("HT/FT"):
+        return "HT/FT"
+    if market.startswith("Correct Score"):
+        return "Correct Score"
+    if market.startswith("Multi Goals"):
+        return "Multi Goals"
+    if market.startswith("Asian Handicap"):
+        return "Asian Handicap"
+    if "Team Over" in market:
+        return "Team Goals"
+    if market.endswith("Clean Sheet"):
+        return "Clean Sheet"
     return "Other"
 
 
@@ -396,6 +503,20 @@ def check_results():
                         for s in (stats or [])
                     )
                 won = analysis.evaluate_stat_market_result(market, total)
+            elif market.startswith("HT/FT"):
+                score_obj = raw_fx.get("score", {})
+                ht = score_obj.get("halftime", {})
+                won = analysis.evaluate_ht_ft_result(
+                    market, ht.get("home"), ht.get("away"),
+                    raw_fx["goals"]["home"], raw_fx["goals"]["away"],
+                )
+            elif (market.startswith("DNB") or market.startswith("Double Chance")
+                  or market.startswith("Correct Score") or market.startswith("Multi Goals")
+                  or market.startswith("Asian Handicap") or "Team Over" in market
+                  or market.endswith("Clean Sheet")):
+                score_home = raw_fx["goals"]["home"]
+                score_away = raw_fx["goals"]["away"]
+                won = analysis.evaluate_wave2_market_result(market, score_home, score_away)
             else:
                 score_home = raw_fx["goals"]["home"]
                 score_away = raw_fx["goals"]["away"]
@@ -405,15 +526,22 @@ def check_results():
 
         leg_results = [entry["results"].get(i) for i in range(len(entry["legs"]))]
         if all(r is not None for r in leg_results):
-            overall_won = all(leg_results)
+            # "PUSH" (επιστροφή) -- ισχύει μόνο για single-leg entries προς το παρόν
+            # (δεν έχουμε ακόμα multi-leg συνδυασμούς εκτός του μελλοντικού Combo Bets)
+            if len(leg_results) == 1 and leg_results[0] == "PUSH":
+                overall_result = "PUSH"
+            else:
+                overall_result = all(r is True for r in leg_results)
+
             success = telegram_sender.edit_message_add_result(
-                entry["channel"], entry["message_id"], entry["original_text"], overall_won
+                entry["channel"], entry["message_id"], entry["original_text"], overall_result
             )
             if success:
                 results_tracker.remove(entry["id"])
+                result_label = "ΑΚΥΡΟ" if overall_result == "PUSH" else ("ΚΕΡΔΙΣΕ" if overall_result else "ΕΧΑΣΕ")
                 logger.info(
                     "Αποτέλεσμα ενημερώθηκε (%s) στο κανάλι %s (msg %s)",
-                    "ΚΕΡΔΙΣΕ" if overall_won else "ΕΧΑΣΕ", entry["channel"], entry["message_id"],
+                    result_label, entry["channel"], entry["message_id"],
                 )
 
     results_tracker.cleanup_stale()

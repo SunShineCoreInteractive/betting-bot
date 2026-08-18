@@ -41,14 +41,20 @@ def send_message(channel_key, text):
 
 def edit_message_add_result(channel_key, message_id, original_text, won):
     """
-    Προσθέτει ✅ ΚΕΡΔΙΣΕ / ❌ ΕΧΑΣΕ στο ΤΕΛΟΣ του ήδη σταλμένου μηνύματος,
-    αντί να στέλνει καινούριο -- έτσι δεν "γεμίζει" το κανάλι.
+    Προσθέτει ✅ ΚΕΡΔΙΣΕ / ❌ ΕΧΑΣΕ / 🔄 ΑΚΥΡΟ στο ΤΕΛΟΣ του ήδη σταλμένου
+    μηνύματος, αντί να στέλνει καινούριο -- έτσι δεν "γεμίζει" το κανάλι.
+    won: True/False/"PUSH" (ισοπαλία σε DNB/ακέραιο Ασιατικό Χάντικαπ -- επιστροφή)
     """
     chat_id = config.BET_TYPE_CHANNELS.get(channel_key)
     if not chat_id or not message_id:
         return False
 
-    emoji_line = "✅ <b>ΚΕΡΔΙΣΕ</b>" if won else "❌ <b>ΕΧΑΣΕ</b>"
+    if won == "PUSH":
+        emoji_line = "🔄 <b>ΑΚΥΡΟ (Επιστροφή Ποντάρισματος)</b>"
+    elif won:
+        emoji_line = "✅ <b>ΚΕΡΔΙΣΕ</b>"
+    else:
+        emoji_line = "❌ <b>ΕΧΑΣΕ</b>"
     new_text = f"{original_text}\n\n{emoji_line}"
 
     url = f"{config.TELEGRAM_API_BASE}/bot{config.TELEGRAM_BOT_TOKEN}/editMessageText"

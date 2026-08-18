@@ -312,6 +312,193 @@ def evaluate_market_result(market_name, score_home, score_away):
     return None
 
 
+# ══════════════════ ΚΥΜΑ 2 — Νέα markets ═══════════════════════
+
+# ── DNB (Draw No Bet) ────────────────────────────────────────────
+
+def prob_dnb(lam_home, lam_away):
+    """
+    Επιστρέφει (p_dnb_home, p_dnb_away) -- πιθανότητα να "κερδίσει" το στοίχημα
+    ΔΕΔΟΜΕΝΟΥ ότι δεν είναι ισοπαλία (σε ισοπαλία επιστρέφεται το ποντάρισμα,
+    οπότε το μοντέλο υπολογίζει value μόνο πάνω στο "ποιος κερδίζει αν κερδίσει κάποιος").
+    """
+    p_home, p_draw, p_away = prob_match_result(lam_home, lam_away)
+    denom = p_home + p_away
+    if denom <= 0:
+        return 0.0, 0.0
+    return p_home / denom, p_away / denom
+
+
+# ── Διπλή Ευκαιρία (Double Chance) ───────────────────────────────
+
+def prob_double_chance(lam_home, lam_away):
+    """Επιστρέφει (p_1X, p_X2, p_12)."""
+    p_home, p_draw, p_away = prob_match_result(lam_home, lam_away)
+    return p_home + p_draw, p_draw + p_away, p_home + p_away
+
+
+# ── Ημίχρονο / Τελικό (HT/FT) ────────────────────────────────────
+
+# Εμπειρικό μερίδιο γκολ που πέφτει στο 1ο ημίχρονο (τα ματς έχουν συνήθως
+# λίγο περισσότερα γκολ στο 2ο ημίχρονο). Απλοποίηση: ίδιο ποσοστό και για
+# τις δύο ομάδες, χωρίς συσχέτιση ανάμεσα στα δύο ημίχρονα.
+FIRST_HALF_GOAL_SHARE = 0.45
+
+
+def prob_ht_ft(lam_home, lam_away):
+    """
+    Επιστρέφει dict {"1/1": p, "1/X": p, ..., "2/2": p} -- 9 συνδυασμοί.
+    ΑΠΛΟΠΟΙΗΣΗ: το 1ο ημίχρονο και το τελικό αποτέλεσμα αντιμετωπίζονται σαν
+    ανεξάρτητα Poisson (στην πραγματικότητα έχουν κάποια συσχέτιση -- δεν την
+    αποτυπώνουμε, το σημειώνουμε ρητά ως γνωστό περιορισμό).
+    """
+    lam_home_1h = lam_home * FIRST_HALF_GOAL_SHARE
+    lam_away_1h = lam_away * FIRST_HALF_GOAL_SHARE
+
+    ht_home, ht_draw, ht_away = prob_match_result(lam_home_1h, lam_away_1h)
+    ft_home, ft_draw, ft_away = prob_match_result(lam_home, lam_away)
+
+    ht_map = {"1": ht_home, "X": ht_draw, "2": ht_away}
+    ft_map = {"1": ft_home, "X": ft_draw, "2": ft_away}
+
+    result = {}
+    for ht_label, ht_p in ht_map.items():
+        for ft_label, ft_p in ft_map.items():
+            result[f"{ht_label}/{ft_label}"] = ht_p * ft_p
+    return result
+
+
+# ── Ακριβές Σκορ (Correct Score) ─────────────────────────────────
+
+def prob_correct_score(lam_home, lam_away, max_goals=5):
+    """Επιστρέφει dict {"2-1": p, "0-0": p, ...} για σκορ έως max_goals-max_goals."""
+    result = {}
+    for h in range(0, max_goals + 1):
+        for a in range(0, max_goals + 1):
+            result[f"{h}-{a}"] = _poisson_pmf(h, lam_home) * _poisson_pmf(a, lam_away)
+    return result
+
+
+# ── Σύνολο Γκολ σε εύρος (Multi Goals) ───────────────────────────
+
+def prob_goals_in_range(low, high, lam_home, lam_away, max_goals=12):
+    """P(low <= σύνολο γκολ <= high)."""
+    total_p = 0.0
+    for h in range(0, max_goals + 1):
+        for a in range(0, max_goals + 1):
+            total = h + a
+            if low <= total <= high:
+                total_p += _poisson_pmf(h, lam_home) * _poisson_pmf(a, lam_away)
+    return total_p
+
+
+# ── Ειδικά Ομάδων: Clean Sheet ───────────────────────────────────
+
+def prob_clean_sheet(lam_opponent):
+    """P(η ομάδα δεν δέχεται γκολ) = P(ο αντίπαλος βάζει 0 γκολ)."""
+    return _poisson_pmf(0, lam_opponent)
+
+
+# ── Αξιολόγηση αποτελεσμάτων Κύματος 2 ───────────────────────────
+
+def evaluate_wave2_market_result(market_name, score_home, score_away):
+    """Αξιολογεί markets Κύματος 2. Επιστρέφει True/False/None."""
+    if score_home is None or score_away is None:
+        return None
+
+    if market_name.startswith("DNB"):
+        if score_home == score_away:
+            return "PUSH"  # ισοπαλία -- επιστροφή ποντάρισματος, όχι κέρδος/χάσιμο
+        if market_name.endswith("Home"):
+            return score_home > score_away
+        if market_name.endswith("Away"):
+            return score_away > score_home
+
+    if market_name.startswith("Double Chance"):
+        if market_name.endswith("1X"):
+            return score_home >= score_away
+        if market_name.endswith("X2"):
+            return score_away >= score_home
+        if market_name.endswith("12"):
+            return score_home != score_away
+
+    if market_name.startswith("HT/FT"):
+        # Χρειάζεται και το ημιχρονικό σκορ -- αξιολογείται ξεχωριστά, βλ. check_results
+        return None
+
+    if market_name.startswith("Correct Score"):
+        try:
+            label = market_name.split(":")[1].strip()
+            h, a = label.split("-")
+            return int(h) == score_home and int(a) == score_away
+        except (IndexError, ValueError):
+            return None
+
+    if market_name.startswith("Multi Goals"):
+        try:
+            label = market_name.split(":")[1].strip()
+            low, high = label.split("-")
+            total = score_home + score_away
+            return int(low) <= total <= int(high)
+        except (IndexError, ValueError):
+            return None
+
+    if market_name.startswith("Home Clean Sheet"):
+        return score_away == 0
+    if market_name.startswith("Away Clean Sheet"):
+        return score_home == 0
+
+    if market_name.startswith("Home Team Over"):
+        try:
+            line = float(market_name.split()[-2])
+        except (IndexError, ValueError):
+            return None
+        return score_home > line
+    if market_name.startswith("Away Team Over"):
+        try:
+            line = float(market_name.split()[-2])
+        except (IndexError, ValueError):
+            return None
+        return score_away > line
+
+    if market_name.startswith("Asian Handicap"):
+        try:
+            handicap = float(market_name.split()[-1])
+        except (IndexError, ValueError):
+            return None
+        adjusted_diff = (score_home + handicap) - score_away
+        if handicap == int(handicap) and adjusted_diff == 0:
+            return None  # push (ακέραιο χάντικαπ, ακριβές ισοφάρισμα) -- επιστροφή ποντάρισματος
+        return adjusted_diff > 0
+
+    return None
+
+
+def evaluate_ht_ft_result(market_name, ht_home, ht_away, ft_home, ft_away):
+    """
+    market_name: "HT/FT: 1/1", "HT/FT: X/2" κλπ.
+    Χρειάζεται ΚΑΙ το ημιχρονικό ΚΑΙ το τελικό σκορ (διαφορετικά από τα άλλα
+    markets που χρειάζονται μόνο το τελικό).
+    """
+    if ht_home is None or ht_away is None or ft_home is None or ft_away is None:
+        return None
+
+    def _result_label(h, a):
+        if h > a:
+            return "1"
+        if h == a:
+            return "X"
+        return "2"
+
+    try:
+        expected = market_name.split(":")[1].strip()
+    except IndexError:
+        return None
+
+    actual = f"{_result_label(ht_home, ht_away)}/{_result_label(ft_home, ft_away)}"
+    return actual == expected
+
+
 def evaluate_stat_market_result(market_name, total_stat_value):
     """
     Για markets τύπου 'Over 9.5 Corners' / 'Over 3.5 Cards' -- total_stat_value

@@ -210,3 +210,201 @@ def parse_all_odds(fixture_odds_response):
     result.update(parse_corners_odds(fixture_odds_response))
     result.update(parse_cards_odds(fixture_odds_response))
     return result
+
+
+# ══════════════════ ΚΥΜΑ 2 — Parsing νέων markets ═══════════════
+
+DNB_BET_NAMES = {"draw no bet"}
+DOUBLE_CHANCE_BET_NAMES = {"double chance"}
+HTFT_BET_NAMES = {"ht/ft", "half time/full time", "halftime/fulltime"}
+CORRECT_SCORE_BET_NAMES = {"exact score", "correct score"}
+ASIAN_HANDICAP_BET_NAMES = {"asian handicap"}
+TEAM_GOALS_BET_NAMES = {"home team total goals", "away team total goals", "team total goals"}
+CLEAN_SHEET_BET_NAMES = {"clean sheet - home", "clean sheet - away", "clean sheet"}
+
+
+def parse_dnb_odds(raw):
+    collected = _collect_values(raw, DNB_BET_NAMES)
+    result = {}
+    label_map = {"home": "DNB Home", "away": "DNB Away"}
+    for label, entries in collected.items():
+        key = label_map.get(label.lower())
+        if key:
+            picked = _pick_odds(entries)
+            if picked:
+                result[key] = picked
+    return result
+
+
+def parse_double_chance_odds(raw):
+    collected = _collect_values(raw, DOUBLE_CHANCE_BET_NAMES)
+    result = {}
+    # Το API-Football συνήθως δίνει labels όπως "Home/Draw", "Draw/Away", "Home/Away"
+    label_map = {
+        "home/draw": "Double Chance: 1X", "1x": "Double Chance: 1X",
+        "draw/away": "Double Chance: X2", "x2": "Double Chance: X2",
+        "home/away": "Double Chance: 12", "12": "Double Chance: 12",
+    }
+    for label, entries in collected.items():
+        key = label_map.get(label.lower().replace(" ", ""))
+        if key:
+            picked = _pick_odds(entries)
+            if picked:
+                result[key] = picked
+    return result
+
+
+def parse_ht_ft_odds(raw):
+    collected = _collect_values(raw, HTFT_BET_NAMES)
+    result = {}
+    for label, entries in collected.items():
+        # Κανονικοποίηση label σε μορφή "1/1", "X/2" κλπ.
+        norm = (
+            label.replace("Home", "1").replace("Draw", "X").replace("Away", "2")
+            .replace(" ", "").replace("-", "/")
+        )
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"HT/FT: {norm}"] = picked
+    return result
+
+
+def parse_correct_score_odds(raw):
+    collected = _collect_values(raw, CORRECT_SCORE_BET_NAMES)
+    result = {}
+    for label, entries in collected.items():
+        norm = label.replace(":", "-").replace(" ", "")
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"Correct Score: {norm}"] = picked
+    return result
+
+
+def parse_asian_handicap_odds(raw):
+    collected = _collect_values(raw, ASIAN_HANDICAP_BET_NAMES)
+    result = {}
+    for label, entries in collected.items():
+        # label π.χ. "Home -1.5" ή "Away +1.5"
+        parts = label.split()
+        if len(parts) != 2:
+            continue
+        side, handicap = parts
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"Asian Handicap {side}: {handicap}"] = picked
+    return result
+
+
+def parse_team_goals_odds(raw):
+    """Over/Under γκολ συγκεκριμένης ομάδας."""
+    result = {}
+    if not raw:
+        return result
+    bookmakers = raw.get("bookmakers", [])
+    collected = {}
+    for bm in bookmakers:
+        bm_name = bm.get("name", "")
+        for bet in bm.get("bets", []):
+            bet_name_l = bet.get("name", "").lower()
+            if "team" not in bet_name_l or "total" not in bet_name_l:
+                continue
+            side = "Home" if "home" in bet_name_l else ("Away" if "away" in bet_name_l else None)
+            if not side:
+                continue
+            for val in bet.get("values", []):
+                label = (val.get("value") or "")
+                if not label.lower().startswith("over"):
+                    continue
+                try:
+                    odd = float(val.get("odd"))
+                except (TypeError, ValueError):
+                    continue
+                key = (side, label)
+                collected.setdefault(key, []).append((odd, bm_name))
+
+    for (side, label), entries in collected.items():
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"{side} Team {label} Goals"] = picked
+    return result
+
+
+def parse_clean_sheet_odds(raw):
+    result = {}
+    if not raw:
+        return result
+    bookmakers = raw.get("bookmakers", [])
+    collected = {}
+    for bm in bookmakers:
+        bm_name = bm.get("name", "")
+        for bet in bm.get("bets", []):
+            bet_name_l = bet.get("name", "").lower()
+            if "clean sheet" not in bet_name_l:
+                continue
+            side = "Home" if "home" in bet_name_l else ("Away" if "away" in bet_name_l else None)
+            if not side:
+                continue
+            for val in bet.get("values", []):
+                label = (val.get("value") or "").lower()
+                if label != "yes":
+                    continue
+                try:
+                    odd = float(val.get("odd"))
+                except (TypeError, ValueError):
+                    continue
+                collected.setdefault(side, []).append((odd, bm_name))
+
+    for side, entries in collected.items():
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"{side} Clean Sheet"] = picked
+    return result
+
+
+def parse_multi_goals_odds(raw):
+    """
+    Σύνολο γκολ σε εύρος (π.χ. 'Multi Goals' market: '2-3', '4-6' κλπ).
+    Δεν είμαστε 100% σίγουροι για το ακριβές όνομα bet type στο API-Football --
+    matching με keyword "goal" στο όνομα ΚΑΙ label της μορφής "N-M".
+    """
+    import re
+    result = {}
+    if not raw:
+        return result
+    bookmakers = raw.get("bookmakers", [])
+    collected = {}
+    for bm in bookmakers:
+        bm_name = bm.get("name", "")
+        for bet in bm.get("bets", []):
+            bet_name_l = bet.get("name", "").lower()
+            if "goal" not in bet_name_l or "over" in bet_name_l or "under" in bet_name_l:
+                continue  # αποφεύγουμε clash με Goals O/U
+            for val in bet.get("values", []):
+                label = (val.get("value") or "").strip()
+                if not re.fullmatch(r"\d+-\d+", label):
+                    continue
+                try:
+                    odd = float(val.get("odd"))
+                except (TypeError, ValueError):
+                    continue
+                collected.setdefault(label, []).append((odd, bm_name))
+
+    for label, entries in collected.items():
+        picked = _pick_odds(entries)
+        if picked:
+            result[f"Multi Goals: {label}"] = picked
+    return result
+
+
+def parse_wave2_odds(raw):
+    """Ενοποιημένο dict για όλα τα markets Κύματος 2."""
+    result = {}
+    result.update(parse_dnb_odds(raw))
+    result.update(parse_double_chance_odds(raw))
+    result.update(parse_ht_ft_odds(raw))
+    result.update(parse_correct_score_odds(raw))
+    result.update(parse_asian_handicap_odds(raw))
+    result.update(parse_team_goals_odds(raw))
+    result.update(parse_clean_sheet_odds(raw))
+    result.update(parse_multi_goals_odds(raw))
+    return result

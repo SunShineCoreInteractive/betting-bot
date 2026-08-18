@@ -47,6 +47,14 @@ MARKET_FAMILY_TO_CHANNEL = {
     "Corners": "stats_agona",
     "Cards": "stats_agona",
     "Scorer": "eidika_paikton",
+    "DNB": "dnb",
+    "Double Chance": "double_chance",
+    "HT/FT": "eidika_hmixrono",
+    "Correct Score": "eidika_hmixrono",
+    "Multi Goals": "multi_goals",
+    "Asian Handicap": "asian_handicap",
+    "Team Goals": "eidika_omadon",
+    "Clean Sheet": "eidika_omadon",
 }
 
 # ── Συχνότητα ελέγχου (ΧΩΡΙΣ Live -- μόνο pre-match) ─────────────
