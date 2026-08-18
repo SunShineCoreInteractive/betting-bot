@@ -38,6 +38,11 @@ ALLOWED_LEAGUE_IDS = set()
 
 def startup():
     global ALLOWED_LEAGUE_IDS
+
+    # Φορτώνουμε τις εκκρεμείς προβλέψεις από τον μόνιμο δίσκο ΠΡΩΤΑ απ' όλα
+    # (τώρα που το logging λειτουργεί ήδη κανονικά, ώστε να φαίνεται το log)
+    results_tracker.load()
+
     logger.info("Ταξινόμηση λιγκών (μία φορά, cache 1 εβδομάδα)...")
     classification = league_classifier.classify_leagues()
     league_classifier.print_summary(classification)
