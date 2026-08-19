@@ -68,8 +68,8 @@ VALUE_EDGE_THRESHOLD = 0.05    # ελάχιστο edge (5%) ώστε μια επ
 
 # Καθολικό όριο πιθανότητας -- στόχος 60%, επιτρέπεται να πέσει λίγο παρακάτω
 # αν δεν βγαίνει τίποτα στο 60%, αλλά ΠΟΤΕ κάτω από αυτό το σκληρό όριο.
-MIN_MODEL_PROBABILITY = 0.55
-TARGET_MODEL_PROBABILITY = 0.60   # μόνο για αναφορά/λογική ταξινόμησης, όχι hard cutoff
+MIN_MODEL_PROBABILITY = 0.65   # ανέβηκε από 55% -- το Statistics Bet έδειξε χαμηλό πραγματικό ποσοστό επιτυχίας (39%), οπότε είμαστε πιο επιλεκτικοί
+TARGET_MODEL_PROBABILITY = 0.70   # μόνο για αναφορά/λογική ταξινόμησης, όχι hard cutoff
 
 # Αποδόσεις -- ελάχιστο 1.20, ΧΩΡΙΣ ανώτατο όριο (ο χρήστης θα κρίνει ο ίδιος)
 MIN_ODDS = 1.20
@@ -138,7 +138,7 @@ SCORER_MIN_MINUTES = 450          # ελάχιστα λεπτά συμμετοχ
 SCORER_NAME_MATCH_THRESHOLD = 0.72   # ελάχιστη ομοιότητα ονόματος (0-1) για ταίριασμα με το market
 
 # ── Combo Bets (ίδιος αγώνας, 2 markets μαζί, π.χ. "1Χ & Over 2.5") ──
-COMBO_BETS_MIN_LEG_PROB = 0.55
+COMBO_BETS_MIN_LEG_PROB = 0.65   # ευθυγραμμισμένο με το νέο γενικό όριο (πριν ήταν 55%)
 COMBO_BETS_MIN_LEGS = 2
 COMBO_BETS_MAX_LEGS = 2
 COMBO_BETS_CORRELATION_PENALTY = 0.90
