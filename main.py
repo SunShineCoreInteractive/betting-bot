@@ -183,10 +183,8 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
                 basis=basis, source=odds_info["source"],
             ))
 
-    # DNB
-    p_dnb_h, p_dnb_a = analysis.prob_dnb(lam_home, lam_away)
-    _try_add("DNB Home", p_dnb_h, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
-    _try_add("DNB Away", p_dnb_a, f"xG home {lam_home:.2f} / away {lam_away:.2f}")
+    # DNB και Σύνολο Γκολ αφαιρέθηκαν οριστικά -- ποτέ δεν έβρισκαν αντιστοιχία
+    # σε πραγματικές αποδόσεις (κανάλια dnb/multi_goals παραμένουν ανενεργά)
 
     # Double Chance
     p_1x, p_x2, p_12 = analysis.prob_double_chance(lam_home, lam_away)
@@ -210,16 +208,6 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
             f"Correct Score: {label}", p, f"xG home {lam_home:.2f} / away {lam_away:.2f}",
             min_prob=config.CORRECT_SCORE_MIN_PROB, edge_threshold=config.CORRECT_SCORE_MIN_EDGE,
         )
-
-    # Multi Goals (εύρος)
-    for market_name in list(odds_lookup.keys()):
-        if market_name.startswith("Multi Goals"):
-            try:
-                low, high = market_name.split(":")[1].strip().split("-")
-                p = analysis.prob_goals_in_range(int(low), int(high), lam_home, lam_away)
-                _try_add(market_name, p, f"Εκτιμώμενα γκολ αγώνα: {lam_home + lam_away:.2f}")
-            except (IndexError, ValueError):
-                continue
 
     # Ασιατικό Χάντικαπ -- ΜΟΝΟ η καλύτερη γραμμή ανά ΠΛΕΥΡΑ (Home/Away), όχι όλες
     # μαζί (αλλιώς "πλημμυρίζει" το κανάλι με 6-8 σχεδόν-ίδιες επιλογές για τον
@@ -690,12 +678,18 @@ def main_loop():
 
     last_market_run = 0
     last_results_run = 0
-    last_stats_summary_run = 0
 
     while True:
         now = time.time()
 
         if now - last_market_run >= config.MARKET_CHECK_INTERVAL_HOURS * 3600:
+            # Ο απολογισμός στέλνεται ΠΡΩΤΑ (δείχνει τι έκανε το ΠΡΟΗΓΟΥΜΕΝΟ
+            # κύμα προβλέψεων), και ΜΕΤΑ στέλνεται το νέο κύμα -- έτσι κάθε
+            # φορά βλέπεις πρώτα τον απολογισμό, μετά τις νέες προβλέψεις.
+            try:
+                run_stats_summary()
+            except Exception:
+                logger.exception("Σφάλμα στον απολογισμό στατιστικών")
             try:
                 run_market_check()
             except Exception:
@@ -708,13 +702,6 @@ def main_loop():
             except Exception:
                 logger.exception("Σφάλμα στον έλεγχο αποτελεσμάτων")
             last_results_run = now
-
-        if now - last_stats_summary_run >= config.STATS_SUMMARY_INTERVAL_HOURS * 3600:
-            try:
-                run_stats_summary()
-            except Exception:
-                logger.exception("Σφάλμα στον απολογισμό στατιστικών")
-            last_stats_summary_run = now
 
         logger.info("API calls σήμερα μέχρι στιγμής: %s", api_football.get_daily_call_count())
         time.sleep(30)

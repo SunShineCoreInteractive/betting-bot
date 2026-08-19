@@ -114,19 +114,20 @@ def format_stats_summary(period_hours, by_channel):
     period_hours: πόσες ώρες καλύπτει ο απολογισμός
     by_channel: dict {channel_key: {"won": int, "lost": int}}
     """
+    period_label = "την τελευταία 1 ώρα" if period_hours == 1 else f"τις τελευταίες {period_hours} ώρες"
     total_won = sum(v["won"] for v in by_channel.values())
     total_lost = sum(v["lost"] for v in by_channel.values())
     total = total_won + total_lost
 
     if total == 0:
         return (
-            f"📊 <b>Απολογισμός (τελευταίες {period_hours} ώρες)</b>\n\n"
+            f"📊 <b>Απολογισμός ({period_label})</b>\n\n"
             f"Καμία πρόβλεψη δεν ολοκληρώθηκε σε αυτό το διάστημα."
         )
 
     win_rate = (total_won / total) * 100
 
-    lines = [f"📊 <b>Απολογισμός (τελευταίες {period_hours} ώρες)</b>\n"]
+    lines = [f"📊 <b>Απολογισμός ({period_label})</b>\n"]
     lines.append(f"Σύνολο προβλέψεων: {total}")
     lines.append(f"✅ Κερδισμένες: {total_won} ({win_rate:.1f}%)")
     lines.append(f"❌ Χαμένες: {total_lost} ({100-win_rate:.1f}%)")

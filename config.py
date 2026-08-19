@@ -82,7 +82,7 @@ PERSISTENT_DATA_DIR = os.environ.get("PERSISTENT_DATA_DIR", "/var/data")
 
 # ── Κανάλι Απολογισμού (Statistics Bet) ──────────────────────────
 STATS_CHANNEL_ID = -1004337725059
-STATS_SUMMARY_INTERVAL_HOURS = 12   # στέλνει απολογισμό 2 φορές/μέρα -- άλλαξέ το αν θες αλλιώς
+STATS_SUMMARY_INTERVAL_HOURS = MARKET_CHECK_INTERVAL_HOURS   # συγχρονισμένο με κάθε "κύμα" προβλέψεων -- όχι ξεχωριστό χρονοδιάγραμμα
 
 CHANNEL_DISPLAY_NAMES = {
     "1x2": "1-Χ-2",
