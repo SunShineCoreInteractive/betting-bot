@@ -432,16 +432,12 @@ def _market_family_label(market):
         return "Cards"
     if market.startswith("Anytime Goalscorer") or market.startswith("First Goalscorer"):
         return "Scorer"
-    if market.startswith("DNB"):
-        return "DNB"
     if market.startswith("Double Chance"):
         return "Double Chance"
     if market.startswith("HT/FT"):
         return "HT/FT"
     if market.startswith("Correct Score"):
         return "Correct Score"
-    if market.startswith("Multi Goals"):
-        return "Multi Goals"
     if market.startswith("Asian Handicap"):
         return "Asian Handicap"
     if "Team Over" in market:
@@ -624,8 +620,8 @@ def check_results():
                     market, ht.get("home"), ht.get("away"),
                     raw_fx["goals"]["home"], raw_fx["goals"]["away"],
                 )
-            elif (market.startswith("DNB") or market.startswith("Double Chance")
-                  or market.startswith("Correct Score") or market.startswith("Multi Goals")
+            elif (market.startswith("Double Chance")
+                  or market.startswith("Correct Score")
                   or market.startswith("Asian Handicap") or "Team Over" in market
                   or market.endswith("Clean Sheet")):
                 score_home = raw_fx["goals"]["home"]
