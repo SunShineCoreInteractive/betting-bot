@@ -304,9 +304,17 @@ def _try_combo_bet(fx, kickoff_str, all_predictions):
 
     legs = candidates[:config.COMBO_BETS_MAX_LEGS]
 
+    # Αν το ζεύγος ανήκει σε γνωστές ΙΣΧΥΡΑ συσχετισμένες οικογένειες (π.χ. Goals O/U + BTTS),
+    # χρησιμοποιούμε πολύ αυστηρότερο penalty -- το κανονικό 0.90 υποεκτιμούσε τη συσχέτιση.
+    families = frozenset(_combo_bets_family(leg.market) for leg in legs)
+    if len(legs) == 2 and families in config.COMBO_BETS_HIGH_CORRELATION_PAIRS:
+        base_penalty = config.COMBO_BETS_HIGH_CORRELATION_PENALTY
+    else:
+        base_penalty = config.COMBO_BETS_CORRELATION_PENALTY
+
     combined_prob = 1.0
     for i, leg in enumerate(legs):
-        penalty = config.COMBO_BETS_CORRELATION_PENALTY ** i
+        penalty = base_penalty ** i
         combined_prob *= leg.model_prob * penalty
 
     if combined_prob < config.COMBO_BETS_MIN_COMBINED_PROB:
