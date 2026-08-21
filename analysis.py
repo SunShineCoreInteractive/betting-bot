@@ -127,6 +127,10 @@ def compute_expected_goals(team_stats_home, team_stats_away, league_avg_goals=2.
     team_stats_* : dict με τουλάχιστον
         {"avg_scored": float, "avg_conceded": float, "sample_size": int}
     Επιστρέφει (lam_home, lam_away) -- expected goals για ΑΥΤΟΝ τον αγώνα.
+    
+    Εφαρμόζει:
+      1. HOME_ADVANTAGE_FACTOR: η home ομάδα σκοράρει παραπάνω, η away λιγότερο
+      2. OVERDISPERSION_CORRECTION: Poisson δεν είναι perfect για ποδόσφαιρο
     """
     league_avg_half = league_avg_goals / 2  # μέσος όρος ανά ομάδα/ματς
 
@@ -137,6 +141,16 @@ def compute_expected_goals(team_stats_home, team_stats_away, league_avg_goals=2.
 
     lam_home = home_attack * away_defense * league_avg_half
     lam_away = away_attack * home_defense * league_avg_half
+    
+    # Home advantage: η home ομάδα έχει ~12% περισσότερα αναμενόμενα γκολ
+    lam_home *= config.HOME_ADVANTAGE_FACTOR
+    lam_away /= config.HOME_ADVANTAGE_FACTOR
+    
+    # Overdispersion correction: το ποδόσφαιρο έχει περισσότερες "εκπλήξεις" 
+    # από το Poisson -- αυξάνουμε ελαφρώς τα expected goals για να το αντισταθμίσουμε
+    overdispersion = getattr(config, 'OVERDISPERSION_CORRECTION', 1.0)
+    lam_home *= overdispersion
+    lam_away *= overdispersion
 
     return max(0.05, lam_home), max(0.05, lam_away)
 
@@ -145,28 +159,43 @@ def team_form_from_fixtures(recent_fixtures, team_id):
     """
     Παίρνει τη λίστα πρόσφατων αγώνων μιας ομάδας (από api_football.get_team_recent_fixtures)
     και υπολογίζει avg_scored / avg_conceded / sample_size.
+    
+    Με FORM_DECAY_FACTOR: ο πιο πρόσφατος αγώνας έχει βάρος 1.0,
+    ο προηγούμενος 0.90, ο πριν από αυτόν 0.90^2, κ.λπ.
+    Αυτό δίνει μεγαλύτερη βαρύτητα σε πρόσφατες τάσεις.
     """
-    scored, conceded, n = 0, 0, 0
-    for f in recent_fixtures:
+    scored_weighted, conceded_weighted, weight_sum = 0, 0, 0
+    
+    for idx, f in enumerate(recent_fixtures):
         home_id = f["teams"]["home"]["id"]
         away_id = f["teams"]["away"]["id"]
         goals_home = f["goals"]["home"]
         goals_away = f["goals"]["away"]
         if goals_home is None or goals_away is None:
             continue  # αγώνας χωρίς τελικό σκορ ακόμα
+        
+        # Βάρος που φθίνει με την ηλικία του αγώνα
+        weight = (config.FORM_DECAY_FACTOR ** idx)
+        
         if team_id == home_id:
-            scored += goals_home
-            conceded += goals_away
-            n += 1
+            scored_weighted += goals_home * weight
+            conceded_weighted += goals_away * weight
+            weight_sum += weight
         elif team_id == away_id:
-            scored += goals_away
-            conceded += goals_home
-            n += 1
+            scored_weighted += goals_away * weight
+            conceded_weighted += goals_home * weight
+            weight_sum += weight
 
-    if n == 0:
+    if weight_sum == 0:
         return {"avg_scored": 1.3, "avg_conceded": 1.3, "sample_size": 0}
 
-    return {"avg_scored": scored / n, "avg_conceded": conceded / n, "sample_size": n}
+    # Η μέση τιμή βασίζεται στο weighted άθροισμα / το άθροισμα των βαρών
+    n_unweighted = int(weight_sum)  # περίπου πόσοι αγώνες "μετράνε"
+    return {
+        "avg_scored": scored_weighted / weight_sum,
+        "avg_conceded": conceded_weighted / weight_sum,
+        "sample_size": max(n_unweighted, 1)  # τουλάχιστον 1 για να μην σπάσει το MIN_SAMPLE_SIZE check
+    }
 
 
 # ── Odds βοηθητικά ───────────────────────────────────────────────
