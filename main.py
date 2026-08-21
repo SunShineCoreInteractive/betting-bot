@@ -181,6 +181,7 @@ def _analyze_wave2_markets(fx, lam_home, lam_away, odds_response):
                 market=market_name, model_prob=model_prob, odds=odds_info["odds"],
                 implied_prob=analysis.implied_probability(odds_info["odds"]), edge=edge,
                 basis=basis, source=odds_info["source"],
+                consensus=odds_info.get("consensus", False), book_count=odds_info.get("book_count", 0),
             ))
 
     # DNB και Σύνολο Γκολ αφαιρέθηκαν οριστικά -- ποτέ δεν έβρισκαν αντιστοιχία
@@ -400,6 +401,7 @@ def _analyze_scorers(fx, lam_home, lam_away, odds_response):
                             odds=odds_info["odds"], implied_prob=analysis.implied_probability(odds_info["odds"]),
                             edge=edge, basis=f"~{player_lam:.2f} αναμ. γκολ παίκτη αυτόν τον αγώνα",
                             source=odds_info["source"], player_id=pid,
+                            consensus=odds_info.get("consensus", False), book_count=odds_info.get("book_count", 0),
                         ))
 
             # First Goalscorer
@@ -421,6 +423,7 @@ def _analyze_scorers(fx, lam_home, lam_away, odds_response):
                             odds=odds_info["odds"], implied_prob=analysis.implied_probability(odds_info["odds"]),
                             edge=edge, basis=f"Μερίδιο επί συνολικών αναμ. γκολ αγώνα ({total_match_lam:.2f})",
                             source=odds_info["source"], player_id=pid,
+                            consensus=odds_info.get("consensus", False), book_count=odds_info.get("book_count", 0),
                         ))
 
     return predictions
@@ -461,10 +464,12 @@ def _channel_for_prediction(pred):
 
 
 def _passes_global_filter(pred):
-    """Καθολικό φίλτρο -- πιθανότητα 55%+ (στόχος 60%), απόδοση 1.20+ χωρίς ανώτατο όριο."""
+    """Καθολικό φίλτρο -- πιθανότητα, απόδοση, ΚΑΙ (νέο) odds consensus."""
     if pred.model_prob < config.MIN_MODEL_PROBABILITY:
         return False
     if pred.odds is None or pred.odds < config.MIN_ODDS:
+        return False
+    if config.REQUIRE_ODDS_CONSENSUS and not pred.consensus:
         return False
     return True
 
