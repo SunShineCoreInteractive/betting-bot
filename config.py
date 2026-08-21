@@ -182,6 +182,13 @@ CORRECT_SCORE_MIN_EDGE = 0.02   # χαμηλότερο απ' ό,τι το καθ
 HTFT_MIN_PROB = 0.15
 HTFT_MIN_EDGE = 0.04
 
+# ── Odds Consensus Filter (νέο πείραμα, 21 Αυγ 2026) ─────────────
+# Αντί να εμπιστευόμαστε μόνο το xG, απαιτούμε ΚΑΙ συμφωνία αγοράς:
+# αν αρκετά bookmakers συμφωνούν κοντά στη διάμεσο, θεωρούμε την τιμή "σταθερή".
+ODDS_CONSENSUS_MIN_BOOKS = 5          # ελάχιστος αριθμός bookmakers για consensus
+ODDS_CONSENSUS_MAX_SPREAD_PCT = 0.03  # ±3% γύρω από τη διάμεσο
+REQUIRE_ODDS_CONSENSUS = True         # False = παλιά συμπεριφορά (χωρίς consensus check)
+
 # ── Παλιές ρυθμίσεις Live (ΔΕΝ χρησιμοποιούνται πια -- το Live αφαιρέθηκε).
 # Παραμένουν εδώ μόνο ώστε οι σχετικές (αχρησιμοποίητες πλέον) συναρτήσεις στο
 # analysis.py/api_football.py να μη σκάνε αν κάποιος τις ξανακαλέσει στο μέλλον.
