@@ -34,6 +34,8 @@ class Prediction:
     basis: str = ""       # σύντομη εξήγηση
     source: str = ""      # ποια στοιχηματική δίνει αυτή την απόδοση
     player_id: Optional[int] = None   # μόνο για markets σκόρερ
+    consensus: bool = False   # True αν ≥ODDS_CONSENSUS_MIN_BOOKS συμφωνούν εντός spread
+    book_count: int = 0       # πόσα bookmakers μέσα στο spread γύρω από τη διάμεσο
 
 
 # ── Poisson βοηθητικά ────────────────────────────────────────────
