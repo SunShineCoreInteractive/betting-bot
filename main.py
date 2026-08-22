@@ -471,14 +471,8 @@ def _channel_for_prediction(pred):
 
 
 def _passes_global_filter(pred):
-    """Καθολικό φίλτρο -- πιθανότητα, απόδοση, ΚΑΙ (νέο) odds consensus."""
-    if pred.model_prob < config.MIN_MODEL_PROBABILITY:
-        return False
-    if pred.odds is None or pred.odds < config.MIN_ODDS:
-        return False
-    if config.REQUIRE_ODDS_CONSENSUS and not pred.consensus:
-        return False
-    return True
+    """Καθολικό φίλτρο -- ΜΟΝΟ στατιστική πιθανότητα. Τα odds είναι πλέον μόνο ενημερωτικά."""
+    return pred.model_prob >= config.MIN_MODEL_PROBABILITY
 
 
 # ── Κύριος κύκλος ελέγχου markets (κάθε MARKET_CHECK_INTERVAL_HOURS) ──
