@@ -674,6 +674,11 @@ def check_results():
             if overall_result != "PUSH":
                 stats_tracker.record_result(entry["channel"], overall_result)
             results_tracker.remove(entry["id"])
+                    entry["message_id"], entry["channel"], result_label,
+                )
+            if overall_result != "PUSH":
+                stats_tracker.record_result(entry["channel"], overall_result)
+            results_tracker.remove(entry["id"])
             else:
                 # Το edit απέτυχε (π.χ. διαγραμμένο μήνυμα/expired) -- ΜΗΝ ξαναπροσπαθείς
                 # για πάντα. Καταγράφουμε το αποτέλεσμα στα stats και αφαιρούμε το entry.
