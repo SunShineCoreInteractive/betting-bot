@@ -405,6 +405,8 @@ def get_opponent_strength(team_id, league_id, season):
     Επιστρέφει (attack_avg, defense_avg) ή None αν αποτύχει (fixture χωρίς σαφή league/season,
     π.χ. φιλικό/διεθνής διοργάνωση εκτός coverage).
     """
+    if budget_is_low():
+        return None
     try:
         stats = get_team_statistics(team_id, league_id, season)
         attack = float(stats["goals"]["for"]["average"]["total"])
