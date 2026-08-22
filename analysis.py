@@ -16,7 +16,7 @@ Corners / Κάρτες / Παίκτες: Φάση 2 (χρειάζονται per-
 
 import math
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import config
@@ -36,6 +36,7 @@ class Prediction:
     player_id: Optional[int] = None   # μόνο για markets σκόρερ
     consensus: bool = False   # True αν ≥ODDS_CONSENSUS_MIN_BOOKS συμφωνούν εντός spread
     book_count: int = 0       # πόσα bookmakers μέσα στο spread γύρω από τη διάμεσο
+    by_bookmaker: dict = field(default_factory=dict)   # {bookmaker_name: odds} -- μόνο ενημερωτικά
 
 
 # ── Poisson βοηθητικά ────────────────────────────────────────────
