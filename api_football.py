@@ -368,6 +368,52 @@ def get_team_recent_fixtures(team_id, last=None):
     )
 
 
+def get_league_avg_goals(league_id, season):
+    """
+    Πραγματικός μέσος όρος συνολικών γκολ/αγώνα της λίγκας (όχι hardcoded 2.6).
+    1 call/standings, cache 1 εβδομάδα -- αντικαθιστά compute_expected_goals(..., league_avg_goals=2.6).
+    """
+    cache_key = f"league_avg_goals_{league_id}_{season}"
+    if cache_key in _cache:
+        ts, data = _cache[cache_key]
+        if (time.time() - ts) < config.LEAGUE_CACHE_HOURS * 3600:
+            return data
+
+    standings = _get("standings", params={"league": league_id, "season": season})
+    total_goals, total_played = 0, 0
+    try:
+        rows = standings[0]["league"]["standings"][0]
+        for row in rows:
+            total_goals += row["all"]["goals"]["for"]
+            total_played += row["all"]["played"]
+    except (IndexError, KeyError, TypeError):
+        pass
+
+    # total_goals/total_played = μέσος όρος γκολ ΑΝΑ ΟΜΑΔΑ ανά αγώνα.
+    # Το compute_expected_goals θέλει league_avg_goals = ΣΥΝΟΛΙΚΑ γκολ/αγώνα (home+away) -- εξ ου *2.
+    avg = (total_goals / total_played * 2) if total_played else 2.6  # fallback αν δεν υπάρχουν standings ακόμα
+    _cache[cache_key] = (time.time(), avg)
+    return avg
+
+
+def get_opponent_strength(team_id, league_id, season):
+    """
+    Attack/defense rating ενός αντιπάλου (goals for/against average της ΔΙΚΗΣ ΤΟΥ
+    λίγκας/σεζόν εκείνη τη στιγμή) -- για opponent-adjusted form στο analysis.py.
+    Cache ήδη υπάρχον (24h) μέσω get_team_statistics -- αντίπαλοι που επαναλαμβάνονται
+    στα πρόσφατα ματς (συνηθισμένο, ίδια λίγκα) κοστίζουν 1 call μόνο τη 1η φορά.
+    Επιστρέφει (attack_avg, defense_avg) ή None αν αποτύχει (fixture χωρίς σαφή league/season,
+    π.χ. φιλικό/διεθνής διοργάνωση εκτός coverage).
+    """
+    try:
+        stats = get_team_statistics(team_id, league_id, season)
+        attack = float(stats["goals"]["for"]["average"]["total"])
+        defense = float(stats["goals"]["against"]["average"]["total"])
+        return attack, defense
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def get_team_statistics(team_id, league_id, season):
     """Συγκεντρωτικά στατιστικά ομάδας για συγκεκριμένη λίγκα/σεζόν (goals for/against κλπ)."""
     cache_key = f"team_stats_{team_id}_{league_id}_{season}"
