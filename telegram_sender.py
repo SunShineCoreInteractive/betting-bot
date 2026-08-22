@@ -79,18 +79,21 @@ def edit_message_add_result(channel_key, message_id, original_text, won):
         return False
 
 
-def format_prediction(league_name, home, away, kickoff_str, market, model_prob, odds, edge, basis, source=""):
-    """Ενιαία μορφή μηνύματος για όλα τα κανάλια markets (χωρίς πλέον ΜΟΝΑ/ΠΑΡΟΛΙ/LIVE labels)."""
-    source_line = f"🏦 {source}\n" if source else ""
+def format_prediction(league_name, home, away, kickoff_str, market, model_prob, odds, edge, basis, source="", by_bookmaker=None):
+    """Ενιαία μορφή μηνύματος -- odds πλέον ΜΟΝΟ ενημερωτικά ανά bookmaker."""
+    bm_block = ""
+    if by_bookmaker:
+        bm_sorted = sorted(by_bookmaker.items(), key=lambda x: -x[1])
+        bm_lines = "\n".join(f"  {name}: {odd:.2f}" for name, odd in bm_sorted)
+        bm_block = f"\n\n💰 Αποδόσεις ανά bookmaker:\n{bm_lines}"
     return (
         f"📊 <b>{market}</b>\n\n"
         f"{league_name}\n"
         f"{home} vs {away}\n"
         f"Έναρξη: {kickoff_str}\n\n"
-        f"Εκτίμηση: {model_prob*100:.0f}% | Απόδοση: {odds:.2f}\n"
-        f"{source_line}"
-        f"Edge: +{edge*100:.1f}%\n\n"
+        f"Εκτίμηση: {model_prob*100:.0f}%\n\n"
         f"📈 Βάση ανάλυσης:\n{basis}"
+        f"{bm_block}"
     )
 
 
