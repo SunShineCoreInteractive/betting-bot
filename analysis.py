@@ -157,17 +157,23 @@ def compute_expected_goals(team_stats_home, team_stats_away, league_avg_goals=2.
     return max(0.05, lam_home), max(0.05, lam_away)
 
 
-def team_form_from_fixtures(recent_fixtures, team_id):
+def team_form_from_fixtures(recent_fixtures, team_id, opponent_strength_fn=None, league_avg_goals=2.6):
     """
     Παίρνει τη λίστα πρόσφατων αγώνων μιας ομάδας (από api_football.get_team_recent_fixtures)
     και υπολογίζει avg_scored / avg_conceded / sample_size.
-    
+
     Με FORM_DECAY_FACTOR: ο πιο πρόσφατος αγώνας έχει βάρος 1.0,
     ο προηγούμενος 0.90, ο πριν από αυτόν 0.90^2, κ.λπ.
     Αυτό δίνει μεγαλύτερη βαρύτητα σε πρόσφατες τάσεις.
+
+    opponent_strength_fn(opponent_id, league_id, season) -> (attack_avg, defense_avg) | None:
+    αν δοθεί, κάθε goals_scored/conceded σταθμίζεται με τη δύναμη ΤΟΥ ΣΥΓΚΕΚΡΙΜΕΝΟΥ αντιπάλου
+    εκείνου του αγώνα -- ένα γκολ σε δυνατή άμυνα μετράει παραπάνω από ένα γκολ σε αδύναμη.
+    Χωρίς αυτό (None ή αποτυχία lookup), fallback στην παλιά raw συμπεριφορά (βάρος 1.0).
     """
+    league_avg_half = league_avg_goals / 2
     scored_weighted, conceded_weighted, weight_sum = 0, 0, 0
-    
+
     for idx, f in enumerate(recent_fixtures):
         home_id = f["teams"]["home"]["id"]
         away_id = f["teams"]["away"]["id"]
@@ -175,18 +181,38 @@ def team_form_from_fixtures(recent_fixtures, team_id):
         goals_away = f["goals"]["away"]
         if goals_home is None or goals_away is None:
             continue  # αγώνας χωρίς τελικό σκορ ακόμα
-        
+
         # Βάρος που φθίνει με την ηλικία του αγώνα
         weight = (config.FORM_DECAY_FACTOR ** idx)
-        
+
         if team_id == home_id:
-            scored_weighted += goals_home * weight
-            conceded_weighted += goals_away * weight
-            weight_sum += weight
+            team_scored, team_conceded, opponent_id = goals_home, goals_away, away_id
         elif team_id == away_id:
-            scored_weighted += goals_away * weight
-            conceded_weighted += goals_home * weight
-            weight_sum += weight
+            team_scored, team_conceded, opponent_id = goals_away, goals_home, home_id
+        else:
+            continue
+
+        # Opponent adjustment: αν ο αντίπαλος έχει καλή άμυνα (defense_avg χαμηλό),
+        # ένα γκολ εναντίον του αξίζει παραπάνω -- αναπροσαρμόζουμε αναλογικά με το league average.
+        adj_factor = 1.0
+        if opponent_strength_fn is not None:
+            opp_league_id = f["league"]["id"]
+            opp_season = f["league"]["season"]
+            strength = opponent_strength_fn(opponent_id, opp_league_id, opp_season)
+            if strength is not None:
+                opp_defense, opp_attack = strength[1], strength[0]
+                # scored ενάντια σε καλή άμυνα (defense_avg < league_avg_half) -> ανεβαίνει
+                scored_adj = team_scored * (league_avg_half / opp_defense) if opp_defense > 0 else team_scored
+                # conceded από δυνατή επίθεση (attack_avg > league_avg_half) -> μειώνεται σχετικά
+                conceded_adj = team_conceded * (league_avg_half / opp_attack) if opp_attack > 0 else team_conceded
+                scored_weighted += scored_adj * weight
+                conceded_weighted += conceded_adj * weight
+                weight_sum += weight
+                continue
+
+        scored_weighted += team_scored * weight
+        conceded_weighted += team_conceded * weight
+        weight_sum += weight
 
     if weight_sum == 0:
         return {"avg_scored": 1.3, "avg_conceded": 1.3, "sample_size": 0}
