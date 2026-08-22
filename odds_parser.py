@@ -70,36 +70,31 @@ def _consensus_info(odds_values, median_odd):
 def _pick_odds(entries):
     """
     entries: [(odd, bookmaker_name), ...] για ΕΝΑ market/outcome.
-    Επιστρέφει {"odds": float, "source": str, "consensus": bool, "book_count": int}
-    -- προτιμώντας τις PREFERRED_BOOKMAKERS για το ίδιο το odds value, αλλά το
-    consensus υπολογίζεται πάντα πάνω σε ΟΛΑ τα entries (όχι μόνο preferred),
-    γιατί θέλουμε να ξέρουμε αν η ΑΓΟΡΑ συνολικά συμφωνεί, όχι μόνο ένα υποσύνολο.
-    Χρησιμοποιούμε ΔΙΑΜΕΣΟ (median) αντί για μέσο όρο -- πολύ πιο ανθεκτικό σε
-    ακραίες/"χαλασμένες" τιμές που εμφανίζονται καμιά φορά σε λιγότερο "ρευστά"
-    markets (π.χ. κόρνερ σε μικρότερες λίγκες).
+    Επιστρέφει {"odds": float, "source": str, "consensus": bool, "book_count": int,
+    "by_bookmaker": {name: odd, ...}}
     """
     if not entries:
         return None
 
-    all_odds_values = [odd for odd, _ in entries]
+    all_odds_values = [o for o, _ in entries]
     market_median = statistics.median(all_odds_values)
     consensus, book_count = _consensus_info(all_odds_values, market_median)
+    by_bookmaker = {name: odd for odd, name in entries}
 
-    preferred_entries = [(odd, name) for odd, name in entries if _matches_preferred(name)]
-
-    if preferred_entries:
-        odds_values = [odd for odd, _ in preferred_entries]
-        names = sorted(set(name for _, name in preferred_entries))
+    preferred = [(o, n) for o, n in entries if _matches_preferred(n)]
+    if preferred:
+        odds_values = [o for o, _ in preferred]
+        source = ", ".join(sorted({n for _, n in preferred}))
         median_odd = statistics.median(odds_values)
-        source = names[0] if len(names) == 1 else f"{', '.join(names)} (διάμεσος)"
-        return {"odds": median_odd, "source": source, "consensus": consensus, "book_count": book_count}
+        return {"odds": median_odd, "source": source, "consensus": consensus,
+                "book_count": book_count, "by_bookmaker": by_bookmaker}
 
     median_odd = market_median
     return {
         "odds": median_odd, "source": f"Διάμεσος αγοράς ({len(entries)} bookmakers)",
         "consensus": consensus, "book_count": book_count,
+        "by_bookmaker": by_bookmaker,
     }
-
 
 def _parse_over_under_category(fixture_odds_response, name_keyword, category_label):
     """
