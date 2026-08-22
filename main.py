@@ -109,11 +109,18 @@ def _get_predictions_for_fixture(fx):
     home_recent = api_football.get_team_recent_fixtures(fx["home_id"])
     away_recent = api_football.get_team_recent_fixtures(fx["away_id"])
 
-    home_form = analysis.team_form_from_fixtures(home_recent, fx["home_id"])
-    away_form = analysis.team_form_from_fixtures(away_recent, fx["away_id"])
+    league_avg_goals = api_football.get_league_avg_goals(fx["league_id"], fx["season"])
+    home_form = analysis.team_form_from_fixtures(
+        home_recent, fx["home_id"],
+        opponent_strength_fn=api_football.get_opponent_strength, league_avg_goals=league_avg_goals,
+    )
+    away_form = analysis.team_form_from_fixtures(
+        away_recent, fx["away_id"],
+        opponent_strength_fn=api_football.get_opponent_strength, league_avg_goals=league_avg_goals,
+    )
     sample_size = min(home_form["sample_size"], away_form["sample_size"])
 
-    lam_home, lam_away = analysis.compute_expected_goals(home_form, away_form)
+    lam_home, lam_away = analysis.compute_expected_goals(home_form, away_form, league_avg_goals=league_avg_goals)
 
     odds_response = api_football.get_prematch_odds(fx["id"])
     odds_lookup = odds_parser.parse_all_odds(odds_response[0] if odds_response else {})
