@@ -86,7 +86,7 @@ MIN_MODEL_PROBABILITY = 0.80   # ανέβηκε από 65% -- ακόμα πιο 
 TARGET_MODEL_PROBABILITY = 0.70   # μόνο για αναφορά/λογική ταξινόμησης, όχι hard cutoff
 
 # Αποδόσεις -- ελάχιστο 1.20, ΧΩΡΙΣ ανώτατο όριο (ο χρήστης θα κρίνει ο ίδιος)
-MIN_ODDS = 1.40
+MIN_ODDS = 0
 
 # ── Μόνιμη αποθήκευση (Render Disk) -- ώστε οι εκκρεμείς προβλέψεις προς
 # έλεγχο αποτελέσματος να ΕΠΙΒΙΩΝΟΥΝ σε κάθε redeploy, όχι να χάνονται.
@@ -187,7 +187,7 @@ HTFT_MIN_EDGE = 0.04
 # αν αρκετά bookmakers συμφωνούν κοντά στη διάμεσο, θεωρούμε την τιμή "σταθερή".
 ODDS_CONSENSUS_MIN_BOOKS = 5          # ελάχιστος αριθμός bookmakers για consensus
 ODDS_CONSENSUS_MAX_SPREAD_PCT = 0.03  # ±3% γύρω από τη διάμεσο
-REQUIRE_ODDS_CONSENSUS = True         # False = παλιά συμπεριφορά (χωρίς consensus check)
+REQUIRE_ODDS_CONSENSUS = False   # bookmakers μόνο ενημερωτικά, όχι φίλτρο
 
 # ── Παλιές ρυθμίσεις Live (ΔΕΝ χρησιμοποιούνται πια -- το Live αφαιρέθηκε).
 # Παραμένουν εδώ μόνο ώστε οι σχετικές (αχρησιμοποίητες πλέον) συναρτήσεις στο
