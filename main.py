@@ -674,7 +674,7 @@ def check_results():
             if overall_result != "PUSH":
                 stats_tracker.record_result(entry["channel"], overall_result)
             results_tracker.remove(entry["id"])
-                    entry["message_id"], entry["channel"], result_label,
+
     results_tracker.save()  # αποθηκεύουμε ΟΠΟΙΑΔΗΠΟΤΕ πρόοδο (ακόμα και μερικά αποτελέσματα legs)
     results_tracker.cleanup_stale()
 
