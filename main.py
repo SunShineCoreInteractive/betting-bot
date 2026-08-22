@@ -675,22 +675,6 @@ def check_results():
                 stats_tracker.record_result(entry["channel"], overall_result)
             results_tracker.remove(entry["id"])
                     entry["message_id"], entry["channel"], result_label,
-                )
-            if overall_result != "PUSH":
-                stats_tracker.record_result(entry["channel"], overall_result)
-            results_tracker.remove(entry["id"])
-            else:
-                # Το edit απέτυχε (π.χ. διαγραμμένο μήνυμα/expired) -- ΜΗΝ ξαναπροσπαθείς
-                # για πάντα. Καταγράφουμε το αποτέλεσμα στα stats και αφαιρούμε το entry.
-                result_label = "ΑΚΥΡΟ" if overall_result == "PUSH" else ("ΚΕΡΔΙΣΕ" if overall_result else "ΕΧΑΣΕ")
-                logger.warning(
-                    "Απέτυχε edit msg %s στο %s -- καταγράφεται (%s) και αφαιρείται χωρίς ενημέρωση Telegram",
-                    entry["message_id"], entry["channel"], result_label,
-                )
-                if overall_result != "PUSH":
-                    stats_tracker.record_result(entry["channel"], overall_result)
-                results_tracker.remove(entry["id"])
-
     results_tracker.save()  # αποθηκεύουμε ΟΠΟΙΑΔΗΠΟΤΕ πρόοδο (ακόμα και μερικά αποτελέσματα legs)
     results_tracker.cleanup_stale()
 
